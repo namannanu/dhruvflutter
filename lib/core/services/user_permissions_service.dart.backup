@@ -1,0 +1,111 @@
+import 'dart:convert';
+import 'package:talent/core/models/u      print(
+          'UserPermissionsService: Response status: ${response.statusCode}');
+      print('UserPermissionsService: Response headers: ${response.headers}');
+      print('UserPermissionsService: Response body: ${response.body}');dart';
+import 'package:talent/core/services/http_service.dart';
+
+class UserPermissionsService {
+  final HttpService _httpService = HttpService();
+
+  /// Get current user's permissions for a specific business
+  Future<List<String>> getUserPermissions(String businessId) async {
+    try {
+      print(
+          '🔄 UserPermissionsService: Getting permissions for business: $businessId');
+
+      final response = await _httpService.get('/api/auth/permissions',
+          queryParams: {'businessId': businessId});
+
+      print(
+          '📋 UserPermissionsService: Response status: ${response.statusCode}');
+      print('📋 UserPermissionsService: Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final permissions = data['permissions'] as List?;
+
+        if (permissions != null) {
+          final permissionList = permissions.map((p) => p.toString()).toList();
+          print(
+              '✅ UserPermissionsService: Found ${permissionList.length} permissions: $permissionList');
+          return permissionList;
+        }
+
+        print('⚠️ UserPermissionsService: No permissions found in response');
+        return <String>[];
+      } else {
+        print(
+            '❌ UserPermissionsService: Failed to get permissions: ${response.statusCode}');
+        print('❌ UserPermissionsService: Error response: ${response.body}');
+        return <String>[];
+      }
+    } catch (error) {
+      print('❌ UserPermissionsService: Exception getting permissions: $error');
+      return <String>[];
+    }
+  }
+
+  /// Get current user's team member info for a specific business
+  Future<TeamMember?> getUserTeamMemberInfo(String businessId) async {
+    try {
+      print(
+          'UserPermissionsService: Getting team member info for business: $businessId');
+
+      // Debug: Log the request details
+      print('DEBUG: Base URL: ${_httpService.publicBaseUrl}');
+      print('DEBUG: Endpoint: /api/auth/team-member');
+      print('DEBUG: Query params: businessId=$businessId');
+
+      final response = await _httpService.get('/api/auth/team-member',
+          queryParams: {'businessId': businessId});
+
+      print(
+          '� UserPermissionsService: Response status: ${response.statusCode}');
+      print('📋 UserPermissionsService: Response headers: ${response.headers}');
+      print('📋 UserPermissionsService: Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        print('🔍 DEBUG: Parsed response data: $data');
+        
+        final teamMemberData = data['teamMember'];
+
+        if (teamMemberData != null) {
+          print('🔍 DEBUG: Team member data found: $teamMemberData');
+          final teamMember =
+              TeamMember.fromJson(teamMemberData as Map<String, dynamic>);
+          print(
+              'UserPermissionsService: Found team member: ${teamMember.user.email} with role: ${teamMember.role}');
+          return teamMember;
+        }
+
+        print('UserPermissionsService: No team member data found in response');
+        print('🔍 DEBUG: Response structure: ${data.keys.toList()}');
+        return null;
+      } else if (response.statusCode == 404) {
+        print(
+            'ℹ️ UserPermissionsService: User is not a team member of this business');
+        print('🔍 DEBUG: Business ID: $businessId');
+        print('🔍 DEBUG: Response body: ${response.body}');
+        return null;
+      } else if (response.statusCode == 401) {
+        print(
+            '🔑 UserPermissionsService: Authentication failed - token may be expired');
+        print('🔍 DEBUG: Response body: ${response.body}');
+        return null;
+      } else {
+        print(
+            '❌ UserPermissionsService: Failed to get team member info: ${response.statusCode}');
+        print('🔍 DEBUG: Response headers: ${response.headers}');
+        print('🔍 DEBUG: Response body: ${response.body}');
+        return null;
+      }
+    } catch (error, stackTrace) {
+      print(
+          '❌ UserPermissionsService: Exception getting team member info: $error');
+      print('🔍 DEBUG: Stack trace: $stackTrace');
+      return null;
+    }
+  }
+}

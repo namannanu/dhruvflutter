@@ -1,0 +1,128 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:talent/core/state/app_state.dart';
+import 'package:talent/core/widgets/notification_badge.dart';
+import 'package:talent/features/shared/screens/messaging_screen.dart';
+import 'package:talent/features/shared/screens/notifications_screen.dart';
+import 'package:talent/features/worker/screens/worker_applications_screen.dart';
+import 'package:talent/features/worker/screens/worker_attendance_screen.dart';
+import 'package:talent/features/worker/screens/worker_dashboard_screen.dart';
+import 'package:talent/features/worker/screens/worker_job_feed_screen.dart';
+import 'package:talent/features/worker/screens/worker_profile_screen.dart';
+
+class WorkerShell extends StatefulWidget {
+  const WorkerShell({super.key});
+
+  @override
+  State<WorkerShell> createState() => _WorkerShellState();
+}
+
+class _WorkerShellState extends State<WorkerShell> {
+  int _index = 0;
+
+  void _openMessaging() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MessagingScreen(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = context.watch<AppState>();
+    final profileName = appState.workerProfile?.firstName ??
+        appState.currentUser?.firstName ??
+        '';
+
+    // Temporary implementation with fewer screens
+    final pages = [
+      const WorkerDashboardScreen(),
+      const WorkerJobFeedScreen(),
+      const WorkerApplicationsScreen(),
+      const WorkerAttendanceScreen(),
+      const NotificationsScreen(),
+      const WorkerProfileScreen(),
+    ];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Worker Dashboard${profileName.isNotEmpty ? ' · $profileName' : ''}',
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Messages',
+            icon: const Icon(Icons.message),
+            onPressed: _openMessaging,
+          ),
+          Badge(
+            label: appState.unreadNotificationCount > 0
+                ? Text(appState.unreadNotificationCount.toString())
+                : null,
+            child: IconButton(
+              icon: const Icon(Icons.notifications_outlined),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const NotificationsScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) async {
+              if (value == 'logout') {
+                await appState.logout();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'logout', child: Text('Logout')),
+            ],
+          ),
+        ],
+      ),
+      body: IndexedStack(index: _index, children: pages),
+      bottomNavigationBar: Consumer<AppState>(
+        builder: (context, appState, child) {
+          return NavigationBar(
+            selectedIndex: _index,
+            onDestinationSelected: (i) => setState(() => _index = i),
+            destinations: [
+              const NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                label: 'Dashboard',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.work_outline),
+                label: 'Jobs',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.assignment_outlined),
+                label: 'Applications',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.check_circle_outline),
+                label: 'Attendance',
+              ),
+              NotificationNavigationDestination(
+                icon: const Icon(Icons.notifications_outlined),
+                selectedIcon: const Icon(Icons.notifications),
+                label: 'Notifications',
+                unreadCount: appState.unreadNotificationCount,
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.person_outline),
+                label: 'Profile',
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
