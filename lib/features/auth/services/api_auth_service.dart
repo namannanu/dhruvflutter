@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/services/cache/worker_cache_repository.dart';
+import 'package:talent/services/auth_token_manager.dart';
 
 import 'api_service.dart';
 import 'auth_service.dart';
@@ -75,6 +76,20 @@ class ApiAuthService implements AuthService {
         _currentUser =
             User.fromJson(jsonDecode(userJson) as Map<String, dynamic>);
         _authStateController.add(true);
+
+        try {
+          final parsedUser = jsonDecode(userJson) as Map<String, dynamic>;
+          await AuthTokenManager.instance.storeLoginResponse({
+            'token': storedToken,
+            'data': {
+              'user': parsedUser,
+              'ownedBusinesses': parsedUser['ownedBusinesses'],
+              'teamBusinesses': parsedUser['teamBusinesses'],
+            },
+          });
+        } catch (error) {
+          debugPrint('Unable to sync token cache: $error');
+        }
       }
     } catch (error) {
       debugPrint('Error loading stored auth: $error');
@@ -170,6 +185,7 @@ class ApiAuthService implements AuthService {
       await _storeAuthPayload(
         user: user,
         token: token,
+        rawAuthData: authData,
         workerProfileJson: workerProfileJson,
         metricsJson: metricsJson,
       );
@@ -251,6 +267,7 @@ class ApiAuthService implements AuthService {
       await _storeAuthPayload(
         user: user,
         token: token,
+        rawAuthData: authData,
         workerProfileJson: workerProfileJson,
         metricsJson: metricsJson,
       );
@@ -278,6 +295,7 @@ class ApiAuthService implements AuthService {
       await _prefs.remove(_userKey);
       await _prefs.remove(_tokenKey);
       await _workerCache?.clearWorkerData();
+      await AuthTokenManager.instance.clearAll();
 
       _authStateController.add(false);
     }
@@ -291,6 +309,7 @@ class ApiAuthService implements AuthService {
   Future<void> _storeAuthPayload({
     required User user,
     required String token,
+    Map<String, dynamic>? rawAuthData,
     Map<String, dynamic>? workerProfileJson,
     Map<String, dynamic>? metricsJson,
   }) async {
@@ -329,6 +348,27 @@ class ApiAuthService implements AuthService {
     }
 
     _authStateController.add(true);
+
+    try {
+      final ownedBusinesses = rawAuthData?['ownedBusinesses'] as List<dynamic>? ??
+          user.ownedBusinesses.map((b) => b.toJson()).toList();
+      final teamBusinesses = rawAuthData?['teamBusinesses'] as List<dynamic>? ??
+          user.teamBusinesses.map((b) => b.toJson()).toList();
+
+      await AuthTokenManager.instance.storeLoginResponse({
+        'token': token,
+        'data': {
+          'user': user.toJson(),
+          'ownedBusinesses': ownedBusinesses,
+          'teamBusinesses': teamBusinesses,
+          if (rawAuthData?['tokenExpiry'] != null)
+            'tokenExpiry': rawAuthData?['tokenExpiry'],
+        },
+      });
+    } catch (error, stackTrace) {
+      debugPrint('AuthTokenManager.storeLoginResponse failed: $error');
+      debugPrint(stackTrace.toString());
+    }
   }
 
   WorkerDashboardMetrics? _deriveMetrics(

@@ -2,6 +2,8 @@
 
 import 'package:flutter/material.dart';
 
+export 'worker_profile.dart';
+
 enum TeamMemberRole { manager, supervisor, admin }
 
 enum TeamPermission {
@@ -21,6 +23,7 @@ class User {
   final String firstName;
   final String lastName;
   final String email;
+  final String? phone;
   final UserType type;
 
   // Extra fields from backend
@@ -37,6 +40,7 @@ class User {
     required this.firstName,
     required this.lastName,
     required this.email,
+    this.phone,
     required this.type,
     this.freeJobsPosted = 0,
     this.freeApplicationsUsed = 0,
@@ -70,6 +74,7 @@ class User {
       firstName: json['firstName']?.toString() ?? '',
       lastName: json['lastName']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
+      phone: stringValue(json['phone']) ?? stringValue(json['phoneNumber']),
       type: inferredType,
       freeJobsPosted: (json['freeJobsPosted'] as num?)?.toInt() ?? 0,
       freeApplicationsUsed:
@@ -94,6 +99,7 @@ class User {
       'firstName': firstName,
       'lastName': lastName,
       'email': email,
+      'phone': phone,
       'userType': type.name,
       'type': type.name,
       'freeJobsPosted': freeJobsPosted,
@@ -195,7 +201,8 @@ class BusinessAssociation {
 
     return BusinessAssociation(
       businessId: businessId,
-      businessName: s(json['businessName'] ?? json['name'] ?? business?['name']),
+      businessName:
+          s(json['businessName'] ?? json['name'] ?? business?['name']),
       ownerEmail: resolveEmail(
         json['owner'] ?? json['ownerEmail'] ?? business?['ownerEmail'],
       ),
@@ -279,6 +286,9 @@ class BusinessLocation {
     this.allowedRadius,
     this.timezone,
     this.notes,
+    this.logoUrl,
+    this.logoOriginalUrl,
+    this.logoSquareUrl,
   });
 
   final String id;
@@ -298,6 +308,9 @@ class BusinessLocation {
   final double? allowedRadius;
   final String? timezone;
   final String? notes;
+  final String? logoUrl;
+  final String? logoOriginalUrl;
+  final String? logoSquareUrl;
 
   /// e.g. "123 Market St, San Francisco, CA 94105"
   String get fullAddress {
@@ -324,6 +337,7 @@ class BusinessLocation {
       if (v is num) return v.toInt();
       return int.tryParse(s(v)) ?? 0;
     }
+
     double? asDouble(dynamic v) {
       if (v == null) return null;
       if (v is double) return v;
@@ -331,17 +345,44 @@ class BusinessLocation {
       return double.tryParse(s(v));
     }
 
+    bool boolValue(dynamic v, {bool defaultValue = true}) {
+      if (v is bool) return v;
+      if (v == null) return defaultValue;
+      final normalized = s(v).trim().toLowerCase();
+      if (normalized.isEmpty) return defaultValue;
+      if (['false', '0', 'no', 'inactive', 'off'].contains(normalized)) {
+        return false;
+      }
+      if (['true', '1', 'yes', 'active', 'on'].contains(normalized)) {
+        return true;
+      }
+      return defaultValue;
+    }
+
+    final logoData = _extractLogoUrls(json);
+
     return BusinessLocation(
       id: s(json['id'] ?? json['_id'] ?? ''),
       name: s(json['name'] ?? json['companyName'] ?? 'Business'),
       description: s(json['description']),
-      address: s(json['street'] ?? addr?['street'] ?? addr?['address']),
-      city: s(json['city'] ?? addr?['city']),
-      state: s(json['state'] ?? addr?['state']),
-      postalCode: s(json['postalCode'] ?? addr?['postalCode'] ?? addr?['zip']),
+      address: s(
+        json['street'] ??
+            addr?['street'] ??
+            addr?['address'] ??
+            loc?['line1'] ??
+            loc?['formattedAddress'],
+      ),
+      city: s(json['city'] ?? addr?['city'] ?? loc?['city']),
+      state: s(json['state'] ?? addr?['state'] ?? loc?['state']),
+      postalCode: s(
+        json['postalCode'] ?? addr?['postalCode'] ?? addr?['zip'] ?? loc?['postalCode'],
+      ),
       phone: s(json['phone'] ?? json['contactPhone']),
-      type: s(json['type'].toString().isEmpty ? 'Location' : json['type']),
-      isActive: (json['isActive'] is bool) ? json['isActive'] as bool : true,
+      type: () {
+        final rawType = s(json['type']);
+        return rawType.isEmpty || rawType == 'null' ? 'Location' : rawType;
+      }(),
+      isActive: boolValue(json['isActive']),
       jobCount: asInt(json['jobCount']),
       hireCount: asInt(json['hireCount']),
       latitude: asDouble(loc?['latitude'] ?? json['latitude']),
@@ -349,7 +390,40 @@ class BusinessLocation {
       allowedRadius: asDouble(loc?['allowedRadius']),
       timezone: s(loc?['timezone']),
       notes: s(loc?['notes']),
+      logoUrl: logoData['logoUrl'],
+      logoOriginalUrl: logoData['logoOriginalUrl'],
+      logoSquareUrl: logoData['logoSquareUrl'],
     );
+  }
+
+  static Map<String, String?> _extractLogoUrls(Map<String, dynamic> json) {
+    String? directUrl;
+    final rawDirect = json['logoUrl'];
+    if (rawDirect is String && rawDirect.trim().isNotEmpty) {
+      directUrl = rawDirect.trim();
+    }
+
+    String? originalUrl;
+    String? squareUrl;
+    final dynamic logo = json['logo'];
+    if (logo is Map) {
+      final original = logo['original'];
+      final square = logo['square'];
+      if (original is Map && original['url'] is String) {
+        originalUrl = original['url'].toString().trim();
+      }
+      if (square is Map && square['url'] is String) {
+        squareUrl = square['url'].toString().trim();
+      }
+    }
+
+    final resolved = directUrl ?? squareUrl ?? originalUrl;
+
+    return {
+      'logoUrl': resolved,
+      'logoOriginalUrl': originalUrl,
+      'logoSquareUrl': squareUrl,
+    };
   }
 
   /// For sending to your API (matches your create payload)
@@ -377,6 +451,11 @@ class BusinessLocation {
       'isActive': isActive,
       'jobCount': jobCount,
       'hireCount': hireCount,
+      if (logoUrl != null && logoUrl!.isNotEmpty) 'logoUrl': logoUrl,
+      if (logoOriginalUrl != null && logoOriginalUrl!.isNotEmpty)
+        'logoOriginalUrl': logoOriginalUrl,
+      if (logoSquareUrl != null && logoSquareUrl!.isNotEmpty)
+        'logoSquareUrl': logoSquareUrl,
       if (locationMap.isNotEmpty) 'location': locationMap,
     };
   }
@@ -513,12 +592,14 @@ class TeamMember {
       return TeamMember(
         id: json['id']?.toString() ?? json['_id']?.toString() ?? '',
         user: user,
-        businessId:
-            businessContext['businessId']?.toString() ?? json['businessId']?.toString() ?? '',
-        role: json['role']?.toString() ?? json['accessLevel']?.toString() ?? 'custom',
+        businessId: businessContext['businessId']?.toString() ??
+            json['businessId']?.toString() ??
+            '',
+        role: json['role']?.toString() ??
+            json['accessLevel']?.toString() ??
+            'custom',
         permissions: permissionNames(json['permissions']),
-        isActive:
-            (json['status']?.toString().toLowerCase() ?? '') == 'active',
+        isActive: (json['status']?.toString().toLowerCase() ?? '') == 'active',
         invitedBy: json['grantedBy']?.toString(),
         invitedAt: dateTimeValue(json['createdAt']),
         joinedAt: dateTimeValue(json['updatedAt']),
@@ -572,171 +653,6 @@ class TeamMember {
       'invitedAt': invitedAt?.toIso8601String(),
       'joinedAt': joinedAt?.toIso8601String(),
       'lastActive': lastActive?.toIso8601String(),
-    };
-  }
-}
-
-@immutable
-class WorkerProfile {
-  const WorkerProfile({
-    required this.id,
-    required this.firstName,
-    required this.lastName,
-    required this.email,
-    required this.phone,
-    required this.skills,
-    required this.rating,
-    required this.experience,
-    required this.languages,
-    required this.availability,
-    required this.isVerified,
-    required this.completedJobs,
-    required this.bio,
-    required this.weeklyEarnings,
-    required this.totalEarnings,
-    required this.notificationsEnabled,
-    required this.preferredRadiusMiles,
-  });
-
-  final String id;
-  final String firstName;
-  final String lastName;
-  final String email;
-  final String phone;
-  final List<String> skills;
-  final double rating;
-  final String experience;
-  final List<String> languages;
-  final List<Map<String, dynamic>> availability;
-  final bool isVerified;
-  final int completedJobs;
-  final String bio;
-  final double weeklyEarnings;
-  final double totalEarnings;
-  final bool notificationsEnabled;
-  final double preferredRadiusMiles;
-
-  WorkerProfile copyWith({
-    String? id,
-    String? firstName,
-    String? lastName,
-    String? email,
-    String? phone,
-    List<String>? skills,
-    double? rating,
-    String? experience,
-    List<String>? languages,
-    List<Map<String, dynamic>>? availability,
-    bool? isVerified,
-    int? completedJobs,
-    String? bio,
-    double? weeklyEarnings,
-    double? totalEarnings,
-    bool? notificationsEnabled,
-    double? preferredRadiusMiles,
-  }) {
-    return WorkerProfile(
-      id: id ?? this.id,
-      firstName: firstName ?? this.firstName,
-      lastName: lastName ?? this.lastName,
-      email: email ?? this.email,
-      phone: phone ?? this.phone,
-      skills: skills ?? this.skills,
-      rating: rating ?? this.rating,
-      experience: experience ?? this.experience,
-      languages: languages ?? this.languages,
-      availability: availability ?? this.availability,
-      isVerified: isVerified ?? this.isVerified,
-      completedJobs: completedJobs ?? this.completedJobs,
-      bio: bio ?? this.bio,
-      weeklyEarnings: weeklyEarnings ?? this.weeklyEarnings,
-      totalEarnings: totalEarnings ?? this.totalEarnings,
-      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
-      preferredRadiusMiles: preferredRadiusMiles ?? this.preferredRadiusMiles,
-    );
-  }
-
-  factory WorkerProfile.fromJson(Map<String, dynamic> json) {
-    String stringValue(dynamic value) {
-      if (value == null) return '';
-      if (value is String) return value;
-      if (value is num || value is bool) {
-        return value.toString();
-      }
-      return value.toString();
-    }
-
-    bool boolValue(dynamic value) {
-      if (value is bool) return value;
-      final str = stringValue(value).toLowerCase();
-      if (str.isEmpty) return false;
-      return str == 'true' || str == '1' || str == 'yes';
-    }
-
-    double doubleValue(dynamic value) {
-      if (value is double) return value;
-      if (value is int) return value.toDouble();
-      return double.tryParse(stringValue(value)) ?? 0;
-    }
-
-    int intValue(dynamic value) {
-      if (value is int) return value;
-      if (value is double) return value.toInt();
-      return int.tryParse(stringValue(value)) ?? 0;
-    }
-
-    List<String> stringList(dynamic value) {
-      if (value is List) {
-        return value.map(stringValue).where((item) => item.isNotEmpty).toList();
-      }
-      return const <String>[];
-    }
-
-    return WorkerProfile(
-      id: stringValue(json['id'] ?? json['_id']),
-      firstName: stringValue(json['firstName']),
-      lastName: stringValue(json['lastName']),
-      email: stringValue(json['email']),
-      phone: stringValue(json['phone'] ?? json['phoneNumber']),
-      skills: stringList(json['skills']),
-      rating: doubleValue(json['rating']),
-      experience: stringValue(json['experience']),
-      languages: stringList(json['languages']),
-      availability: (json['availability'] is List)
-          ? (json['availability'] as List)
-              .whereType<Map<String, dynamic>>()
-              .toList()
-          : <Map<String, dynamic>>[],
-      isVerified: boolValue(
-          json['isVerified'] ?? (json['verificationStatus'] == 'verified')),
-      completedJobs: intValue(json['completedJobs']),
-      bio: stringValue(json['bio']),
-      weeklyEarnings: doubleValue(json['weeklyEarnings']),
-      totalEarnings: doubleValue(json['totalEarnings']),
-      notificationsEnabled: boolValue(json['notificationsEnabled']),
-      preferredRadiusMiles: doubleValue(json['preferredRadiusMiles']).abs(),
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return <String, dynamic>{
-      'id': id,
-      'firstName': firstName,
-      'lastName': lastName,
-      'email': email,
-      'phone': phone,
-      'skills': skills,
-      'rating': rating,
-      'experience': experience,
-      'languages': languages,
-      'availability': availability,
-      'isVerified': isVerified,
-      'completedJobs': completedJobs,
-      'bio': bio,
-      'weeklyEarnings': weeklyEarnings,
-      'totalEarnings': totalEarnings,
-      'notificationsEnabled': notificationsEnabled,
-      'preferredRadiusMiles': preferredRadiusMiles,
     };
   }
 }

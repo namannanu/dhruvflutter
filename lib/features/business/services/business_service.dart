@@ -9,6 +9,15 @@ abstract class BusinessService {
     required String state,
     required String postalCode,
     required String phone,
+    String? logoUrl,
+    // Google Places API location data
+    double? latitude,
+    double? longitude,
+    String? placeId,
+    String? formattedAddress,
+    double? allowedRadius,
+    String? locationName,
+    String? locationNotes,
   });
 
   Future<void> updateBusiness(
@@ -21,6 +30,8 @@ abstract class BusinessService {
     String? postalCode,
     String? phone,
     bool? isActive,
+    String? logoUrl,
+    double? allowedRadius,
   });
 
   /// Delete a business location

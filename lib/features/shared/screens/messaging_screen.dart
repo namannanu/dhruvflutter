@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -16,21 +18,89 @@ class _MessagingScreenState extends State<MessagingScreen> {
   List<Conversation> _conversations = [];
   bool _isLoading = true;
   String _searchQuery = '';
+  Timer? _conversationsTimer;
+  bool _isFetchingConversations = false;
+  final Map<String, DateTime> _conversationUpdateCache = {};
   
   final ConversationApiService _apiService = ConversationApiService();
 
   @override
   void initState() {
     super.initState();
-    _loadConversations();
+    _loadConversations(showLoader: true, showErrorSnackBar: true);
+    _startConversationPolling();
   }
 
-  Future<void> _loadConversations() async {
-    try {
+  @override
+  void dispose() {
+    _conversationsTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startConversationPolling() {
+    _conversationsTimer?.cancel();
+    _conversationsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _loadConversations();
+    });
+  }
+
+  Future<void> _loadConversations({
+    bool showLoader = false,
+    bool showErrorSnackBar = false,
+  }) async {
+    if (_isFetchingConversations) return;
+    _isFetchingConversations = true;
+
+    if (showLoader && mounted) {
       setState(() => _isLoading = true);
-      _conversations = await _apiService.getConversations();
+    }
+
+    try {
+      final conversations = await _apiService.getConversations();
+      if (!mounted) return;
+
+      final newUnreadConversations = conversations.where((conversation) {
+        final previousTimestamp = _conversationUpdateCache[conversation.id];
+        final hasNewUpdate = previousTimestamp == null ||
+            conversation.updatedAt.isAfter(previousTimestamp);
+        return hasNewUpdate && conversation.unreadCount > 0;
+      }).toList();
+
+      if (!showLoader &&
+          newUnreadConversations.isNotEmpty &&
+          mounted &&
+          ModalRoute.of(context)?.isCurrent == true) {
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+
+        final messageText = newUnreadConversations.length == 1
+            ? 'New message in "${newUnreadConversations.first.title}"'
+            : '${newUnreadConversations.length} conversations have new messages';
+
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(messageText),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+
+        unawaited(context.read<AppState>().loadNotifications());
+      }
+
+      setState(() {
+        _conversations = conversations;
+      });
+
+      _conversationUpdateCache
+        ..clear()
+        ..addEntries(
+          conversations.map(
+            (conversation) => MapEntry(conversation.id, conversation.updatedAt),
+          ),
+        );
     } catch (error) {
-      if (mounted) {
+      if (showErrorSnackBar && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to load conversations: $error'),
@@ -39,9 +109,10 @@ class _MessagingScreenState extends State<MessagingScreen> {
         );
       }
     } finally {
-      if (mounted) {
+      if (showLoader && mounted) {
         setState(() => _isLoading = false);
       }
+      _isFetchingConversations = false;
     }
   }
 
@@ -62,7 +133,7 @@ class _MessagingScreenState extends State<MessagingScreen> {
       ),
     ).then((_) {
       // Refresh conversations when returning from detail screen
-      _loadConversations();
+      _loadConversations(showErrorSnackBar: true);
     });
   }
 
@@ -109,7 +180,7 @@ class _MessagingScreenState extends State<MessagingScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadConversations,
+        onRefresh: () => _loadConversations(showErrorSnackBar: true),
         child: Column(
           children: [
             // Search bar
@@ -341,38 +412,120 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
   List<Message> _messages = [];
   bool _isLoading = true;
   bool _isSending = false;
+  bool _isFetchingMessages = false;
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
+  Timer? _messagePollingTimer;
+  final Set<String> _knownMessageIds = <String>{};
   
   final ConversationApiService _apiService = ConversationApiService();
 
   @override
   void initState() {
     super.initState();
-    _loadMessages();
+    _loadMessages(
+      initialLoad: true,
+      showErrorSnackBar: true,
+    );
     _markAsRead();
+    _startMessagePolling();
   }
 
   @override
   void dispose() {
+    _messagePollingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadMessages() async {
-    try {
+  void _startMessagePolling() {
+    _messagePollingTimer?.cancel();
+    _messagePollingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _loadMessages();
+    });
+  }
+
+  Future<void> _loadMessages({
+    bool initialLoad = false,
+    bool showErrorSnackBar = false,
+  }) async {
+    if (_isFetchingMessages) return;
+    _isFetchingMessages = true;
+
+    if (initialLoad && mounted) {
       setState(() => _isLoading = true);
-      _messages = await _apiService.getMessages(widget.conversation.id);
-      
-      // Scroll to bottom after loading messages
-      if (mounted) {
+    }
+
+    final previousLength = _messages.length;
+    final previousLastId = _messages.isNotEmpty ? _messages.last.id : null;
+
+    try {
+      final messages = await _apiService.getMessages(widget.conversation.id);
+      if (!mounted) return;
+
+      final hasNewMessages = messages.length > previousLength ||
+          (messages.isNotEmpty &&
+              previousLastId != null &&
+              messages.last.id != previousLastId);
+
+      final currentUserId = context.read<AppState>().currentUser?.id;
+      final newMessages = messages
+          .where((message) => !_knownMessageIds.contains(message.id))
+          .toList();
+      final incomingMessages = newMessages
+          .where((message) => message.senderId != currentUserId)
+          .toList();
+      final bool shouldHandleNewMessages =
+          hasNewMessages || incomingMessages.isNotEmpty;
+
+      setState(() {
+        _messages = messages;
+        if (initialLoad) {
+          _isLoading = false;
+        }
+      });
+
+      _knownMessageIds
+        ..clear()
+        ..addAll(messages.map((message) => message.id));
+
+      if (mounted && (initialLoad || shouldHandleNewMessages)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _scrollToBottom();
         });
       }
+
+      if (!initialLoad && incomingMessages.isNotEmpty && mounted) {
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+
+        final latest = incomingMessages.last;
+        final preview = latest.body.trim();
+        final text = preview.isEmpty
+            ? 'New message received'
+            : 'New message: ${preview.length > 70 ? '${preview.substring(0, 70)}…' : preview}';
+
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(text),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+
+        unawaited(context.read<AppState>().loadNotifications());
+      }
+
+      if (initialLoad || shouldHandleNewMessages) {
+        unawaited(_markAsRead());
+      }
     } catch (error) {
-      if (mounted) {
+      if (initialLoad && mounted) {
+        setState(() => _isLoading = false);
+      }
+
+      if (showErrorSnackBar && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to load messages: $error'),
@@ -381,9 +534,7 @@ class _ConversationDetailScreenState extends State<ConversationDetailScreen> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      _isFetchingMessages = false;
     }
   }
 

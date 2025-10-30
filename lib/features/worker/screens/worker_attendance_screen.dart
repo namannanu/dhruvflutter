@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
+import 'package:talent/core/services/location_service.dart';
 import 'package:talent/core/state/app_state.dart';
 
 class WorkerAttendanceScreen extends StatefulWidget {
@@ -127,13 +128,22 @@ class _WorkerAttendanceScreenState extends State<WorkerAttendanceScreen> {
       if (!mounted) return;
       final time = _formatTime(updated.clockIn);
       _showSnack(time == null ? 'Clock-in recorded' : 'Clocked in at $time');
+    } on LocationException catch (error) {
+      if (!mounted) return;
+      _showSnack(error.message);
     } catch (error) {
       if (!mounted) return;
 
-      // Handle specific "already clocked in" error with user-friendly message
+      // Handle specific error types with user-friendly messages
       final errorMessage = error.toString();
+
       if (errorMessage.contains('already clocked in')) {
         _showSnack('You are already clocked in for this shift');
+        // Refresh attendance records to sync UI state with server
+        appState.loadWorkerAttendanceRecords();
+      } else if (errorMessage.contains('missing a GPS location') ||
+          errorMessage.contains('configure a business location')) {
+        _showLocationConfigurationDialog(record);
       } else {
         _showError(error);
       }
@@ -162,8 +172,20 @@ class _WorkerAttendanceScreenState extends State<WorkerAttendanceScreen> {
       if (!mounted) return;
       final time = _formatTime(updated.clockOut);
       _showSnack(time == null ? 'Clock-out recorded' : 'Clocked out at $time');
+    } on LocationException catch (error) {
+      _showSnack(error.message);
     } catch (error) {
-      _showError(error);
+      if (!mounted) return;
+
+      // Handle specific error types with user-friendly messages
+      final errorMessage = error.toString();
+
+      if (errorMessage.contains('missing a GPS location') ||
+          errorMessage.contains('configure a business location')) {
+        _showLocationConfigurationDialog(record);
+      } else {
+        _showError(error);
+      }
     } finally {
       if (mounted) {
         setState(() => _actionLoading.remove(record.id));
@@ -175,6 +197,140 @@ class _WorkerAttendanceScreenState extends State<WorkerAttendanceScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
+    );
+  }
+
+  void _showLocationConfigurationDialog(AttendanceRecord record) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.location_off, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Location Not Configured'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This shift doesn\'t have a work location set up for attendance tracking.',
+                style: TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'What needs to happen:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '• Your employer needs to configure a business location\n'
+                      '• This enables GPS-based attendance tracking\n'
+                      '• Once set up, you can clock in/out normally',
+                      style: TextStyle(color: Colors.orange.shade800),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Job: ${record.jobTitle ?? 'Unknown'}',
+                style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
+              if (record.companyName != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Company: ${record.companyName}',
+                  style: TextStyle(color: Colors.grey.shade600),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _contactEmployerAboutLocation(record);
+              },
+              icon: const Icon(Icons.message),
+              label: const Text('Contact Employer'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _contactEmployerAboutLocation(AttendanceRecord record) {
+    // Create a message template for the employer
+    final message =
+        'Hi! I\'m unable to clock in for my shift "${record.jobTitle ?? 'shift'}" '
+        'because the work location hasn\'t been configured for GPS attendance tracking. '
+        'Could you please set up the business location so I can clock in? Thanks!';
+
+    // For now, just show the message to copy
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Message for Employer'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Copy this message to send to your employer:',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: SelectableText(
+                  message,
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
     );
   }
 

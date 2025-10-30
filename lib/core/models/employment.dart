@@ -44,9 +44,12 @@ class EmploymentWorkLocation {
       !latitude!.isNaN &&
       !longitude!.isNaN;
 
-  bool get hasValidCoordinates => hasCoordinates &&
-      latitude! >= -90 && latitude! <= 90 &&
-      longitude! >= -180 && longitude! <= 180;
+  bool get hasValidCoordinates =>
+      hasCoordinates &&
+      latitude! >= -90 &&
+      latitude! <= 90 &&
+      longitude! >= -180 &&
+      longitude! <= 180;
 
   LatLng? get latLng =>
       hasValidCoordinates ? LatLng(latitude!, longitude!) : null;
@@ -141,6 +144,9 @@ class EmploymentRecord {
     required this.hireDate,
     this.endDate,
     this.workLocation,
+    this.employerName,
+    this.jobTitle,
+    this.businessName,
   });
 
   final String id;
@@ -154,6 +160,9 @@ class EmploymentRecord {
   final DateTime hireDate;
   final DateTime? endDate;
   final EmploymentWorkLocation? workLocation;
+  final String? employerName;
+  final String? jobTitle;
+  final String? businessName;
 
   bool get isActive => employmentStatus == 'active';
 
@@ -171,6 +180,9 @@ class EmploymentRecord {
       if (endDate != null) 'endDate': endDate!.toIso8601String(),
       if (workLocation != null) 'workLocationDetails': workLocation!.toJson(),
       if (workLocation?.label != null) 'workLocation': workLocation!.label,
+      if (employerName != null) 'employerName': employerName,
+      if (jobTitle != null) 'jobTitle': jobTitle,
+      if (businessName != null) 'businessName': businessName,
     };
   }
 
@@ -192,20 +204,68 @@ class EmploymentRecord {
       return DateTime.tryParse(value.toString()) ?? DateTime.now();
     }
 
+    String employerId = '';
+    String? employerName;
+    final employerRaw = json['employer'];
+    if (employerRaw is Map<String, dynamic>) {
+      employerId = stringValue(employerRaw['id']) ??
+          stringValue(employerRaw['_id']) ??
+          '';
+      final first = stringValue(employerRaw['firstName']);
+      final last = stringValue(employerRaw['lastName']);
+      final combined = [first, last]
+          .where((value) => value != null && value.isNotEmpty)
+          .map((value) => value!)
+          .join(' ')
+          .trim();
+      if (combined.isNotEmpty) {
+        employerName = combined;
+      } else {
+        employerName = stringValue(employerRaw['name']);
+      }
+    } else {
+      employerId = stringValue(employerRaw) ?? '';
+    }
+
+    String jobId = '';
+    String? jobTitle;
+    final jobRaw = json['job'];
+    if (jobRaw is Map<String, dynamic>) {
+      jobId = stringValue(jobRaw['id']) ?? stringValue(jobRaw['_id']) ?? '';
+      jobTitle = stringValue(jobRaw['title']);
+    } else {
+      jobId = stringValue(jobRaw) ?? '';
+    }
+
+    String businessId = '';
+    String? businessName;
+    final businessRaw = json['business'];
+    if (businessRaw is Map<String, dynamic>) {
+      businessId = stringValue(businessRaw['id']) ??
+          stringValue(businessRaw['_id']) ??
+          '';
+      businessName = stringValue(businessRaw['businessName']) ??
+          stringValue(businessRaw['name']);
+    } else {
+      businessId = stringValue(businessRaw) ?? '';
+    }
+
     return EmploymentRecord(
       id: stringValue(json['_id']) ?? stringValue(json['id']) ?? '',
       workerId: stringValue(json['worker']) ?? '',
-      employerId: stringValue(json['employer']) ?? '',
-      jobId: stringValue(json['job']) ?? '',
-      businessId: stringValue(json['business']) ?? '',
+      employerId: employerId,
+      employerName: employerName,
+      jobId: jobId,
+      jobTitle: jobTitle,
+      businessId: businessId,
+      businessName: businessName,
       position: stringValue(json['position']) ?? 'Role',
       hourlyRate: parseDouble(json['hourlyRate']),
       employmentStatus: stringValue(json['employmentStatus']) ?? 'active',
       hireDate: parseDate(json['hireDate']),
       endDate: json['endDate'] != null ? parseDate(json['endDate']) : null,
-      workLocation:
-          EmploymentWorkLocation.fromJson(
-              json['workLocationDetails'] as Map<String, dynamic>?),
+      workLocation: EmploymentWorkLocation.fromJson(
+          json['workLocationDetails'] as Map<String, dynamic>?),
     );
   }
 }

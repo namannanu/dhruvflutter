@@ -114,11 +114,20 @@ class Application {
         workerMap?['workerId'] ??
         json['workerId'] ??
         json['worker'];
-    final jobIdValue = jobMap?['_id'] ??
+    final jobIdValue = jobMap?['\$oid'] ??
+        jobMap?['_id'] ??
         jobMap?['id'] ??
         jobMap?['jobId'] ??
         json['jobId'] ??
         json['job'];
+
+    // Handle MongoDB ObjectId format for direct job field
+    dynamic finalJobIdValue = jobIdValue;
+    if (json['job'] is Map<String, dynamic>) {
+      final jobObjMap = json['job'] as Map<String, dynamic>;
+      finalJobIdValue ??=
+          jobObjMap['\$oid'] ?? jobObjMap['_id'] ?? jobObjMap['id'];
+    }
 
     final createdAtRaw = json['createdAt'] ?? json['appliedAt'];
     final submittedAtRaw = json['submittedAt'] ?? json['appliedAt'];
@@ -186,7 +195,7 @@ class Application {
     return Application(
       id: idValue?.toString() ?? '',
       workerId: workerIdValue?.toString() ?? '',
-      jobId: jobIdValue?.toString() ?? '',
+      jobId: finalJobIdValue?.toString() ?? '',
       status: _parseApplicationStatus(statusRaw),
       rawStatus: statusRaw,
       message: messageValue,

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/state/app_state.dart';
-import 'package:talent/core/widgets/notification_badge.dart';
 import 'package:talent/features/employer/screens/employer_dashboard_screen.dart';
 import 'package:talent/features/employer/screens/employer_jobs_screen.dart';
 import 'package:talent/features/employer/screens/employer_profile_screen.dart';
@@ -26,7 +25,6 @@ class _EmployerShellState extends State<EmployerShell> {
     EmployerJobsScreen(),
     EmployeeHireApplicationScreen(),
     EmployeeAttendanceManagementScreen(),
-    NotificationsScreen(),
     EmployerProfileScreen(),
   ];
 
@@ -39,6 +37,18 @@ class _EmployerShellState extends State<EmployerShell> {
     );
   }
 
+  void _openNotifications() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const NotificationsScreen(),
+      ),
+    );
+  }
+
+  
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -50,6 +60,12 @@ class _EmployerShellState extends State<EmployerShell> {
             icon: const Icon(Icons.message),
             onPressed: _openMessaging,
           ),
+          IconButton(
+            tooltip: 'Notifications',
+            icon: const Icon(Icons.notifications),
+            onPressed: _openNotifications,
+          ),
+
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
@@ -87,30 +103,29 @@ class _EmployerShellState extends State<EmployerShell> {
                 _index = value;
               });
             },
-            destinations: [
-              const NavigationDestination(
+            destinations: const [
+        
+              NavigationDestination(
                 icon: Icon(Icons.dashboard_outlined),
                 label: 'Dashboard',
               ),
-              const NavigationDestination(
+         
+              NavigationDestination(
                 icon: Icon(Icons.work_outline),
                 label: 'Jobs',
               ),
-              const NavigationDestination(
+            
+              NavigationDestination(
                 icon: Icon(Icons.insights_outlined),
                 label: 'Application',
               ),
-              const NavigationDestination(
+              
+              NavigationDestination(
                 icon: Icon(Icons.check_circle_outline),
                 label: 'Attendance',
               ),
-              NotificationNavigationDestination(
-                icon: const Icon(Icons.notifications_outlined),
-                selectedIcon: const Icon(Icons.notifications),
-                label: 'Notifications',
-                unreadCount: appState.unreadNotificationCount,
-              ),
-              const NavigationDestination(
+        
+              NavigationDestination(
                 icon: Icon(Icons.person_outline),
                 label: 'Profile',
               ),

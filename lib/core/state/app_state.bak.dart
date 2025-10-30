@@ -100,7 +100,8 @@ class AppState extends ChangeNotifier {
           isVerified: false,
           notificationsEnabled: true,
           preferredRadiusMiles: 10.0,
-          availability: const [],
+          availability: const [], 
+          emailNotificationsEnabled: true,
         );
 
         // Create basic metrics

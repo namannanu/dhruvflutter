@@ -11,3 +11,5 @@ export 'place.dart';
 export 'employment.dart';
 export 'user.dart';
 export 'worker_metrics.dart';
+export 'payment_record.dart';
+export 'employer_feedback.dart';

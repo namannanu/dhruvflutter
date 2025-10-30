@@ -1,10 +1,12 @@
-// ignore_for_file: require_trailing_commas
+// ignore_for_file: require_trailing_commas, unused_element, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:talent/core/config/payment_config.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/features/employer/screens/job_payment_screen.dart';
 
 class EmployerJobCreateScreen extends StatefulWidget {
   const EmployerJobCreateScreen({super.key});
@@ -28,7 +30,7 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
 
   String? _selectedJobType;
   String _urgency = 'normal';
-  String _frequency = 'once';
+  final String _frequency = 'once';
   bool _hasOvertime = false;
   bool _requestVerification = false;
 
@@ -38,6 +40,14 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
 
   final Set<String> _selectedWorkDays = <String>{};
   bool _submitting = false;
+  static const int _freeJobQuota = 2;
+  static const double _jobPostingFee = 50.0;
+  static const Map<String, String> _currencySymbols = {
+    'INR': '₹',
+    'USD': '\$',
+    'EUR': '€',
+    'GBP': '£',
+  };
 
   static const List<String> _jobTypes = <String>[
     'Dishwasher',
@@ -52,70 +62,7 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
     'Other',
   ];
 
-  static const List<String> _weekDays = <String>[
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-    'Sunday',
-  ];
 
-  static final List<_FrequencyOption> _frequencyOptions = <_FrequencyOption>[
-    const _FrequencyOption(
-        'once', 'One Time Job', 'Single shift or project', Icons.access_time),
-    const _FrequencyOption(
-        'weekly', 'Weekly', 'Select specific days of the week', Icons.repeat),
-    const _FrequencyOption('monthly', 'Monthly',
-        'Every month, recurring position', Icons.calendar_today_outlined),
-    const _FrequencyOption(
-        'custom', 'Custom Schedule', 'Choose specific days', Icons.schedule),
-  ];
-
-  static final List<_JobTemplate> _jobTemplates = <_JobTemplate>[
-    const _JobTemplate(
-      title: 'Morning Barista',
-      description:
-          'Prepare espresso drinks, maintain a clean station, and deliver friendly service.',
-      requirements:
-          '2+ years barista experience\nKnowledge of espresso machines\nExcellent customer service',
-      suggestedRate: '20-24',
-      frequency: 'weekly',
-    ),
-    const _JobTemplate(
-      title: 'Front of House Server',
-      description:
-          'Welcome guests, manage table service, handle POS orders, and support closing duties.',
-      requirements:
-          'Experience with POS systems\nStrong customer focus\nEvening and weekend availability',
-      suggestedRate: '18-22 + tips',
-      frequency: 'weekly',
-    ),
-    const _JobTemplate(
-      title: 'Kitchen Prep Cook',
-      description:
-          'Assist with daily prep, maintain kitchen cleanliness, and support line cooks during service.',
-      requirements:
-          'Knife skills\nFood handlers certification\nAbility to lift 25 lbs',
-      suggestedRate: '19-25',
-      frequency: 'weekly',
-    ),
-  ];
-
-  static final Map<String, _JobSuggestion> _smartSuggestions =
-      <String, _JobSuggestion>{
-    'Dishwasher': const _JobSuggestion(
-        rate: '15-20',
-        peak: 'Evening shifts',
-        location: 'Restaurant districts'),
-    'Server': const _JobSuggestion(
-        rate: '18-25', peak: 'Weekend shifts', location: 'Downtown areas'),
-    'Cashier': const _JobSuggestion(
-        rate: '14-18', peak: 'Holiday seasons', location: 'Shopping centers'),
-    'Cook': const _JobSuggestion(
-        rate: '20-28', peak: 'Lunch & dinner rush', location: 'Food districts'),
-  };
 
   late final List<_TimeOption> _timeOptions;
 
@@ -128,6 +75,58 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
       _locationController.text = businesses.first.address;
     }
     _timeOptions = _generateTimeOptions();
+  }
+
+  String _buildSubmitLabel(AppState appState) {
+    if (_submitting) {
+      return 'Publishing…';
+    }
+
+    final user = appState.currentUser;
+    final feeText = _formatFee();
+
+    if (user == null) {
+      return 'Continue to publish ($feeText)';
+    }
+
+    final bool isPremium = user.isPremium;
+    final int freeJobsUsed = user.freeJobsPosted;
+    int freeJobsRemaining = _freeJobQuota - freeJobsUsed;
+    if (freeJobsRemaining < 0) {
+      freeJobsRemaining = 0;
+    }
+
+    if (isPremium) {
+      return 'Publish job';
+    }
+
+    if (freeJobsRemaining > 0) {
+      return 'Publish ($freeJobsRemaining free job post${freeJobsRemaining == 1 ? '' : 's'})';
+    }
+
+    return 'Continue to publish ($feeText)';
+  }
+
+  String? _buildFreeJobMessage(AppState appState) {
+    final user = appState.currentUser;
+    if (user == null) {
+      return null;
+    }
+
+    if (user.isPremium) {
+      return 'Premium account: unlimited job posts.';
+    }
+
+    int remaining = _freeJobQuota - user.freeJobsPosted;
+    if (remaining < 0) {
+      remaining = 0;
+    }
+    if (remaining > 0) {
+      return '$remaining free job post${remaining == 1 ? '' : 's'} remaining';
+    }
+
+    final feeText = _formatFee();
+    return 'No free job posts remaining. Publishing costs $feeText.';
   }
 
   @override
@@ -220,84 +219,8 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
     }
   }
 
-  Future<void> _pickTemplate() async {
-    final _JobTemplate? template = await showModalBottomSheet<_JobTemplate>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Pick a template',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 320,
-                  child: ListView.builder(
-                    itemCount: _jobTemplates.length,
-                    itemBuilder: (context, index) {
-                      final _JobTemplate template = _jobTemplates[index];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        child: ListTile(
-                          title: Text(template.title),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 4),
-                              Text(template.description),
-                              const SizedBox(height: 6),
-                              Text(
-                                  'Suggested rate: \$${template.suggestedRate}/hr'),
-                            ],
-                          ),
-                          trailing:
-                              const Icon(Icons.arrow_forward_ios, size: 16),
-                          onTap: () => Navigator.pop(context, template),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
 
-    if (template != null) {
-      setState(() {
-        _selectedJobType = template.title;
-        _hourlyRateController.text = template.suggestedRate.split('-').first;
-        _descriptionController.text = template.description;
-        _requirementsController.text = template.requirements;
-        _frequency = template.frequency;
-      });
-    }
-  }
 
-  _JobSuggestion? get _activeSuggestion {
-    if (_selectedJobType == null) return null;
-    return _smartSuggestions[_selectedJobType!];
-  }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) {
@@ -458,17 +381,37 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
             : _selectedWorkDays.map((day) => day.toLowerCase()).toList(),
       );
 
-      // Process the payment
-      await appState.processJobPostingPayment(
-        jobId: job.id,
-        amount: 50.0,
-        currency: 'USD',
-        paymentMethodId:
-            'pm_card_default', // You might want to get this from a payment form
+      if (!mounted) return;
+      if (!job.premiumRequired) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Job posted successfully.')),
+        );
+        Navigator.of(context).pop(true);
+        return;
+      }
+
+      final paymentCompleted = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (context) => JobPaymentScreen(
+            jobId: job.id,
+            amount: 50.0,
+            currency: 'INR',
+          ),
+        ),
       );
 
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
+      if (paymentCompleted == true) {
+        Navigator.of(context).pop(true);
+      } else {
+        setState(() => _submitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Payment is required to publish this job. You can resume payment from the jobs list.',
+            ),
+          ),
+        );
+      }
     } catch (error) {
       if (!mounted) return;
 
@@ -503,6 +446,7 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     final businesses = appState.businesses;
+    final freeJobMessage = _buildFreeJobMessage(appState);
 
     if (businesses.isEmpty) {
       _selectedBusiness = null;
@@ -516,7 +460,6 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
       }
     }
 
-    final _JobSuggestion? suggestion = _activeSuggestion;
 
     return Scaffold(
       body: SafeArea(
@@ -546,11 +489,7 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
                               fontSize: 20, fontWeight: FontWeight.w600),
                         ),
                       ),
-                      TextButton.icon(
-                        onPressed: _submitting ? null : _pickTemplate,
-                        icon: const Icon(Icons.lightbulb_outline, size: 18),
-                        label: const Text('Use template'),
-                      ),
+
                     ],
                   ),
                 ),
@@ -566,13 +505,11 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
                       const SizedBox(height: 16),
                       _buildJobTypeSection(),
                       const SizedBox(height: 16),
-                      _buildFrequencySection(),
-                      const SizedBox(height: 16),
-                      _buildPaySection(suggestion),
-                      const SizedBox(height: 16),
                       _buildLocationSection(),
                       const SizedBox(height: 16),
                       _buildScheduleSection(),
+                      const SizedBox(height: 16),
+                      _buildPaySection(null),
                       const SizedBox(height: 16),
                       _buildUrgencySection(),
                       const SizedBox(height: 16),
@@ -588,26 +525,52 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
       ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: ElevatedButton.icon(
-          onPressed: _submitting ? null : _submit,
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            textStyle:
-                const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-          icon: _submitting
-              ? const SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.check_circle_outline),
-          label:
-              Text(_submitting ? 'Publishing…' : 'Continue to payment (\$50)'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (freeJobMessage != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  freeJobMessage,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+            ElevatedButton.icon(
+              onPressed: _submitting ? null : _submit,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                textStyle:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              icon: _submitting
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.check_circle_outline),
+              label: Text(_buildSubmitLabel(appState)),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  String _formatFee() {
+    final currencyCode = PaymentConfig.defaultCurrency.toUpperCase();
+    final symbol = _currencySymbols[currencyCode] ?? currencyCode;
+    final needsSpacing = symbol == currencyCode;
+    final amount = _jobPostingFee.toStringAsFixed(0);
+    return needsSpacing ? '$symbol $amount' : '$symbol$amount';
   }
 
   Widget _buildBusinessSelector(List<BusinessLocation> businesses) {
@@ -723,124 +686,7 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
     );
   }
 
-  Widget _buildFrequencySection() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'How often do you need this worker?',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
-            Column(
-              children: _frequencyOptions.map((option) {
-                final bool selected = _frequency == option.value;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    onTap: () => setState(() => _frequency = option.value),
-                    tileColor: selected ? Colors.blue.shade50 : null,
-                    shape: RoundedRectangleBorder(
-                      side: BorderSide(
-                        color: selected ? Colors.blue : Colors.grey.shade300,
-                      ),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    leading: Icon(option.icon,
-                        color: selected ? Colors.blue : Colors.grey.shade600),
-                    title: Text(option.label,
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(option.description),
-                  ),
-                );
-              }).toList(),
-            ),
-            if (_frequency != 'once') _buildWorkDaySelector(),
-          ],
-        ),
-      ),
-    );
-  }
 
-  Widget _buildWorkDaySelector() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text('Select work days',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
-              if (_selectedWorkDays.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.only(left: 8),
-                  child: Text('* required',
-                      style: TextStyle(color: Colors.red, fontSize: 12)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _WorkdayQuickButton(
-                label: 'All days',
-                onTap: () => setState(() => _selectedWorkDays
-                  ..clear()
-                  ..addAll(_weekDays)),
-              ),
-              _WorkdayQuickButton(
-                label: 'Weekdays',
-                onTap: () => setState(() {
-                  _selectedWorkDays
-                    ..clear()
-                    ..addAll(_weekDays.take(5));
-                }),
-              ),
-              _WorkdayQuickButton(
-                label: 'Weekends',
-                onTap: () => setState(() {
-                  _selectedWorkDays
-                    ..removeWhere((day) => !_weekDays.sublist(5).contains(day))
-                    ..addAll(_weekDays.sublist(5));
-                }),
-              ),
-              _WorkdayQuickButton(
-                label: 'Clear',
-                onTap: () => setState(() => _selectedWorkDays.clear()),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _weekDays.map((day) {
-              final bool selected = _selectedWorkDays.contains(day);
-              return FilterChip(
-                label: Text(day),
-                selected: selected,
-                onSelected: (value) {
-                  setState(() {
-                    if (value) {
-                      _selectedWorkDays.add(day);
-                    } else {
-                      _selectedWorkDays.remove(day);
-                    }
-                  });
-                },
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildPaySection(_JobSuggestion? suggestion) {
     return Card(

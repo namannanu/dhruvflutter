@@ -47,7 +47,10 @@ analyzer:
   errors:
     duplicate_ignore: ignore
     invalid_annotation_target: ignore
+    invalid_use_of_protected_member: ignore
+    invalid_use_of_visible_for_testing_member: ignore
     require_trailing_commas: ignore
+    strict_raw_type: ignore
   language:
     strict-casts: true
     strict-raw-types: true

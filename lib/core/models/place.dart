@@ -17,16 +17,33 @@ class PlaceSuggestion {
   final String? description;
 
   factory PlaceSuggestion.fromJson(Map<String, dynamic> json) {
-    final structured = json['structured_formatting'] as Map<String, dynamic>?;
+    try {
+      debugPrint('🏷️ PlaceSuggestion.fromJson: Starting parse');
+      final structured = json['structured_formatting'] as Map<String, dynamic>?;
 
-    return PlaceSuggestion(
-      placeId: json['place_id']?.toString() ?? '',
-      primaryText: structured?['main_text']?.toString() ??
-          json['description']?.toString() ??
-          '',
-      secondaryText: structured?['secondary_text']?.toString(),
-      description: json['description']?.toString(),
-    );
+      final suggestion = PlaceSuggestion(
+        placeId: json['place_id']?.toString() ?? '',
+        primaryText: structured?['main_text']?.toString() ??
+            json['description']?.toString() ??
+            '',
+        secondaryText: structured?['secondary_text']?.toString(),
+        description: json['description']?.toString(),
+      );
+      debugPrint(
+          '🏷️ PlaceSuggestion.fromJson: Successfully parsed ${suggestion.placeId}');
+      return suggestion;
+    } catch (e, stackTrace) {
+      debugPrint('🏷️ PlaceSuggestion.fromJson: ERROR during parsing: $e');
+      debugPrint('🏷️ PlaceSuggestion.fromJson: Stack trace: $stackTrace');
+      debugPrint('🏷️ PlaceSuggestion.fromJson: Raw JSON: $json');
+
+      // Return a safe fallback
+      return const PlaceSuggestion(
+        placeId: 'error',
+        primaryText: 'Error parsing suggestion',
+        description: 'Failed to parse suggestion data',
+      );
+    }
   }
 }
 
@@ -77,7 +94,8 @@ class PlaceDetails {
         latitude >= -90 &&
         latitude <= 90 &&
         longitude >= -180 &&
-        longitude <= 180;
+        longitude <= 180 &&
+        !(latitude == 0 && longitude == 0); // Exclude null island (0,0)
   }
 
   String? _componentLong(List<String> componentTypes) {
@@ -153,51 +171,83 @@ class PlaceDetails {
   }
 
   factory PlaceDetails.fromJson(Map<String, dynamic> json) {
-    final result = json['result'] is Map<String, dynamic>
-        ? json['result'] as Map<String, dynamic>
-        : json;
-    final geometry = result['geometry'] as Map<String, dynamic>?;
-    final location = geometry?['location'] as Map<String, dynamic>?;
-    final latitude = _safeCoordinate(location?['lat']);
-    final longitude = _safeCoordinate(location?['lng']);
-    final components = (result['address_components'] as List?)
-            ?.whereType<Map<String, dynamic>>()
-            .map(
-              (component) => PlaceAddressComponent(
-                longName: component['long_name']?.toString() ?? '',
-                shortName: component['short_name']?.toString() ?? '',
-                types: (component['types'] as List?)
-                        ?.map((e) => e.toString())
-                        .toList(growable: false) ??
-                    const <String>[],
-              ),
-            )
-            .where((component) => component.longName.isNotEmpty)
-            .toList(growable: false) ??
-        const <PlaceAddressComponent>[];
+    debugPrint('🏭 PlaceDetails.fromJson: Starting parse');
+    try {
+      final result = json['result'] is Map<String, dynamic>
+          ? json['result'] as Map<String, dynamic>
+          : json;
+      debugPrint('🏭 PlaceDetails.fromJson: Got result object');
 
-    return PlaceDetails(
-      placeId: result['place_id']?.toString() ?? '',
-      name: result['name']?.toString() ??
-          result['vicinity']?.toString() ??
-          result['formatted_address']?.toString() ??
-          'Selected location',
-      formattedAddress: result['formatted_address']?.toString() ??
-          result['name']?.toString() ??
-          '',
-      location: LatLng(
-        latitude,
-        longitude,
-      ),
-      plusCode: result['plus_code'] is Map
-          ? (result['plus_code'] as Map)['global_code']?.toString()
-          : null,
-      types: (result['types'] as List?)
-              ?.map((e) => e.toString())
+      final geometry = result['geometry'] as Map<String, dynamic>?;
+      final location = geometry?['location'] as Map<String, dynamic>?;
+      debugPrint('🏭 PlaceDetails.fromJson: Parsing coordinates');
+      final latitude = _safeCoordinate(location?['lat']);
+      final longitude = _safeCoordinate(location?['lng']);
+      debugPrint(
+          '🏭 PlaceDetails.fromJson: Coordinates parsed - lat=$latitude, lng=$longitude');
+
+      // Safe LatLng creation
+      LatLng safeLocation;
+      try {
+        debugPrint('🏭 PlaceDetails.fromJson: Creating LatLng object');
+        safeLocation = LatLng(latitude, longitude);
+        debugPrint('🏭 PlaceDetails.fromJson: LatLng created successfully');
+      } catch (e) {
+        debugPrint('🏭 PlaceDetails.fromJson: LatLng creation failed: $e');
+        // If LatLng creation fails, use a safe default
+        safeLocation = const LatLng(0, 0);
+      }
+
+      final components = (result['address_components'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(
+                (component) => PlaceAddressComponent(
+                  longName: component['long_name']?.toString() ?? '',
+                  shortName: component['short_name']?.toString() ?? '',
+                  types: (component['types'] as List?)
+                          ?.map((e) => e.toString())
+                          .toList(growable: false) ??
+                      const <String>[],
+                ),
+              )
+              .where((component) => component.longName.isNotEmpty)
               .toList(growable: false) ??
-          const <String>[],
-      addressComponents: components,
-    );
+          const <PlaceAddressComponent>[];
+
+      return PlaceDetails(
+        placeId: result['place_id']?.toString() ?? '',
+        name: result['name']?.toString() ??
+            result['vicinity']?.toString() ??
+            result['formatted_address']?.toString() ??
+            'Selected location',
+        formattedAddress: result['formatted_address']?.toString() ??
+            result['name']?.toString() ??
+            '',
+        location: safeLocation,
+        plusCode: result['plus_code'] is Map
+            ? (result['plus_code'] as Map)['global_code']?.toString()
+            : null,
+        types: (result['types'] as List?)
+                ?.map((e) => e.toString())
+                .toList(growable: false) ??
+            const <String>[],
+        addressComponents: components,
+      );
+    } catch (e, stackTrace) {
+      debugPrint('🏭 PlaceDetails.fromJson: ERROR during parsing: $e');
+      debugPrint('🏭 PlaceDetails.fromJson: Stack trace: $stackTrace');
+      debugPrint('🏭 PlaceDetails.fromJson: Raw JSON: $json');
+
+      // Return a safe fallback PlaceDetails
+      return const PlaceDetails(
+        placeId: 'error',
+        name: 'Error loading location',
+        formattedAddress: 'Failed to parse location details',
+        location: LatLng(0, 0),
+        types: [],
+        addressComponents: [],
+      );
+    }
   }
 }
 
@@ -214,7 +264,18 @@ double _safeCoordinate(dynamic value) {
     return 0;
   }
 
+  // Additional safety: reject extreme values that could cause map issues
   if (parsed < -1000 || parsed > 1000) {
+    return 0;
+  }
+
+  // Ensure the value is safe for LatLng construction
+  try {
+    // Test that this value can be used in LatLng
+    LatLng(parsed, 0); // Test latitude
+    LatLng(0, parsed); // Test longitude
+  } catch (e) {
+    // If LatLng construction fails, return 0
     return 0;
   }
 

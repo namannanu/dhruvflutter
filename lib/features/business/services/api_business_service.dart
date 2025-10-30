@@ -30,6 +30,15 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
     required String state,
     required String postalCode,
     required String phone,
+    String? logoUrl,
+    // Google Places API location data
+    double? latitude,
+    double? longitude,
+    String? placeId,
+    String? formattedAddress,
+    double? allowedRadius,
+    String? locationName,
+    String? locationNotes,
   }) async {
     const endpoint = 'api/businesses';
     final body = {
@@ -42,6 +51,21 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
         'zip': postalCode,
       },
       'phone': phone,
+      if (logoUrl != null && logoUrl.isNotEmpty) 'logoUrl': logoUrl,
+
+      // Include Google Places API location data if provided
+      if (latitude != null && longitude != null)
+        'location': {
+          'latitude': latitude,
+          'longitude': longitude,
+          'formattedAddress':
+              formattedAddress ?? '$street, $city, $state $postalCode',
+          'name': locationName ?? name,
+          if (placeId != null) 'placeId': placeId,
+          'allowedRadius': allowedRadius ?? 150.0, // Default 150 meters
+          if (locationNotes != null) 'notes': locationNotes,
+          'isActive': true,
+        },
     };
 
     // Build headers with Authorization token
@@ -107,6 +131,8 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
     String? postalCode,
     String? phone,
     bool? isActive,
+    String? logoUrl,
+    double? allowedRadius,
   }) async {
     // Auto-extract business_id from current user if not provided
     final resolvedBusinessId = businessId ?? _currentUserBusinessId;
@@ -123,12 +149,18 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
       if (postalCode != null) 'zip': postalCode,
     };
 
+    final locationUpdates = {
+      if (allowedRadius != null) 'allowedRadius': allowedRadius,
+    };
+
     final updates = {
       if (name != null) 'name': name,
       if (description != null) 'description': description,
       if (addressUpdates.isNotEmpty) 'address': addressUpdates,
+      if (locationUpdates.isNotEmpty) 'location': locationUpdates,
       if (phone != null) 'phone': phone,
       if (isActive != null) 'isActive': isActive,
+      if (logoUrl != null) 'logoUrl': logoUrl,
     };
 
     final requestHeaders = headers(authToken: _authToken);
@@ -333,42 +365,7 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
   // Entity parsing methods
   BusinessLocation _parseBusinessLocation(dynamic value) {
     final json = _mapOrNull(value) ?? const <String, dynamic>{};
-    final id = _string(json['id']) ?? _string(json['_id']) ?? '';
-    final name = _string(json['name']) ?? 'Business';
-    final address = _string(json['address']) ??
-        _string(json['street']) ??
-        _string(_mapOrNull(json['address'])?['street']) ??
-        '';
-    final city = _string(json['city']) ??
-        _string(_mapOrNull(json['address'])?['city']) ??
-        '';
-    final state = _string(json['state']) ??
-        _string(_mapOrNull(json['address'])?['state']) ??
-        '';
-    final postalCode = _string(json['postalCode']) ??
-        _string(_mapOrNull(json['address'])?['postalCode']) ??
-        '';
-    final phone = _string(json['contactPhone']) ?? '';
-    final type = _string(json['type']) ?? 'Location';
-    final isActive = _string(json['isActive'])?.toLowerCase() == 'true';
-    final jobCount = int.tryParse(_string(json['jobCount']) ?? '') ?? 0;
-    final hireCount = int.tryParse(_string(json['hireCount']) ?? '') ?? 0;
-    final description = _string(json['description']) ?? '';
-
-    return BusinessLocation(
-      id: id.isEmpty ? name : id,
-      name: name,
-      address: address,
-      city: city,
-      state: state,
-      postalCode: postalCode,
-      phone: phone,
-      type: type,
-      isActive: isActive,
-      jobCount: jobCount,
-      hireCount: hireCount,
-      description: description,
-    );
+    return BusinessLocation.fromJson(json);
   }
 
   TeamMember _parseTeamMember(dynamic value) {

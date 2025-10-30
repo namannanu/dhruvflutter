@@ -496,26 +496,79 @@ class ApiJobService extends BaseApiService implements JobService {
     return null;
   }
 
+  String _composeName(Map<String, dynamic>? json) {
+    if (json == null) return '';
+    // Prefer an explicit full name field if present
+    final fullName = _string(json['name']) ?? _string(json['fullName']);
+    if (fullName != null && fullName.isNotEmpty) return fullName;
+
+    // Otherwise compose from first/last name variants
+    final first = _string(json['firstName']) ?? _string(json['givenName']);
+    final last = _string(json['lastName']) ?? _string(json['familyName']);
+
+    final parts = <String>[];
+    if (first != null && first.isNotEmpty) parts.add(first);
+    if (last != null && last.isNotEmpty) parts.add(last);
+
+    final composed = parts.join(' ');
+    return composed.isNotEmpty ? composed : '';
+  }
+
   // Entity parsing methods
   JobPosting _parseJobPosting(dynamic value) {
     final json = _mapOrNull(value) ?? const <String, dynamic>{};
+    final employerDetails =
+        _mapOrNull(json['employerDetails']) ?? _mapOrNull(json['employer']);
+    final businessDetails =
+        _mapOrNull(json['businessDetails']) ?? _mapOrNull(json['business']);
+    final createdByDetails = _mapOrNull(json['createdByDetails']) ??
+        (json['createdBy'] is Map ? _mapOrNull(json['createdBy']) : null);
+
     final id = _string(json['id']) ?? _string(json['_id']) ?? '';
     final title = _string(json['title']) ?? '';
     final description = _string(json['description']) ?? '';
-    final employerId =
-        _string(json['employerId']) ?? _string(json['employer']) ?? '';
-    final businessId =
-        _string(json['businessId']) ?? _string(json['business']) ?? '';
+
+    final employerId = _string(json['employerId']) ??
+        _string(employerDetails?['_id']) ??
+        _string(employerDetails?['id']) ??
+        _string(json['employer']) ??
+        '';
+    final employerEmail =
+        _string(employerDetails?['email']) ?? _string(json['employerEmail']);
+    final employerName = _composeName(employerDetails);
+
+    final businessId = _string(json['businessId']) ??
+        _string(businessDetails?['_id']) ??
+        _string(businessDetails?['id']) ??
+        _string(json['business']) ??
+        '';
+    final businessName = _string(json['businessName']) ??
+        _string(businessDetails?['businessName']) ??
+        _string(businessDetails?['name']) ??
+        '';
+
+    final createdById = _string(json['createdById']) ??
+        _string(createdByDetails?['_id']) ??
+        _string(createdByDetails?['id']);
+    final createdByEmail =
+        _string(createdByDetails?['email']) ?? _string(json['createdByEmail']);
+    final createdByName = _composeName(createdByDetails);
+    final createdByTag = _string(json['createdByTag']);
+
     final hourlyRate = double.tryParse(_string(json['hourlyRate']) ?? '') ?? 0;
 
-    // Handle schedule object from backend
     final schedule = _mapOrNull(json['schedule']);
     final scheduleStart = DateTime.tryParse(_string(schedule?['startDate']) ??
+            _string(json['scheduleStart']) ??
             _string(json['startDate']) ??
+            _string(json['start']) ??
             '') ??
         DateTime.now();
-    final scheduleEnd = DateTime.tryParse(
-            _string(schedule?['endDate']) ?? _string(json['endDate']) ?? '') ??
+    final scheduleEnd = DateTime.tryParse(_string(schedule?['endDate']) ??
+            _string(json['scheduleEnd']) ??
+            _string(json['endDate']) ??
+            _string(json['end']) ??
+            '') ??
         scheduleStart.add(const Duration(hours: 4));
     final recurrence = _string(schedule?['recurrence']) ??
         _string(json['recurrence']) ??
@@ -524,7 +577,6 @@ class ApiJobService extends BaseApiService implements JobService {
         _stringList(json['workDays']) ??
         <String>[];
 
-    // Handle overtime object from backend
     final overtime = _mapOrNull(json['overtime']);
     final overtimeRate = double.tryParse(_string(overtime?['rateMultiplier']) ??
             _string(json['overtimeRate']) ??
@@ -536,8 +588,10 @@ class ApiJobService extends BaseApiService implements JobService {
     final isVerificationRequired = json['verificationRequired'] == true ||
         json['isVerificationRequired'] == true;
     final status = _parseJobStatus(_string(json['status']));
-    final postedAt =
-        DateTime.tryParse(_string(json['createdAt']) ?? '') ?? DateTime.now();
+    final postedAt = DateTime.tryParse(_string(json['createdAt']) ??
+            _string(json['postedAt']) ??
+            '') ??
+        DateTime.now();
     final distanceMiles =
         double.tryParse(_string(json['distanceMiles']) ?? '') ?? 0;
     final hasApplied = json['hasApplied'] == true;
@@ -545,10 +599,6 @@ class ApiJobService extends BaseApiService implements JobService {
     final locationSummary = _string(json['locationSummary']);
     final applicantsCount =
         int.tryParse(_string(json['applicantsCount']) ?? '') ?? 0;
-
-    // Get business name if populated
-    final business = _mapOrNull(json['business']);
-    final businessName = _string(business?['name']) ?? '';
 
     return JobPosting(
       id: id.isEmpty ? title : id,
@@ -573,6 +623,12 @@ class ApiJobService extends BaseApiService implements JobService {
       locationSummary: locationSummary,
       applicantsCount: applicantsCount,
       businessName: businessName,
+      employerEmail: employerEmail,
+      employerName: employerName,
+      createdById: createdById,
+      createdByTag: createdByTag,
+      createdByEmail: createdByEmail,
+      createdByName: createdByName,
     );
   }
 

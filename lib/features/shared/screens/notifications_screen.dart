@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:talent/core/models/communication.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/features/shared/screens/notification_preferences_screen.dart';
+import 'package:talent/features/shared/screens/message_notification_test_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -50,6 +51,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     ),
                   );
                   break;
+                case 'test_messaging':
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          const MessageNotificationTestScreen(),
+                    ),
+                  );
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -80,6 +89,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     Icon(Icons.settings),
                     SizedBox(width: 8),
                     Text('Preferences'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'test_messaging',
+                child: Row(
+                  children: [
+                    Icon(Icons.bug_report),
+                    SizedBox(width: 8),
+                    Text('Test Messaging'),
                   ],
                 ),
               ),
@@ -228,6 +247,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return 'Payments';
       case NotificationType.schedule:
         return 'Schedule';
+      case NotificationType.attendance:
+        return 'Attendance';
       case NotificationType.message:
         return 'Messages';
       case NotificationType.system:
@@ -274,6 +295,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         Navigator.of(context).pushNamed('/messages');
         break;
       case NotificationType.schedule:
+      case NotificationType.attendance:
         // Navigate to attendance/schedule
         Navigator.of(context).pushNamed('/attendance');
         break;
@@ -407,6 +429,8 @@ class NotificationTile extends StatelessWidget {
         return Colors.orange;
       case NotificationType.schedule:
         return Colors.purple;
+      case NotificationType.attendance:
+        return Colors.indigo;
       case NotificationType.message:
         return Colors.teal;
       case NotificationType.system:
@@ -424,6 +448,8 @@ class NotificationTile extends StatelessWidget {
         return Icons.payment;
       case NotificationType.schedule:
         return Icons.schedule;
+      case NotificationType.attendance:
+        return Icons.access_time;
       case NotificationType.message:
         return Icons.message;
       case NotificationType.system:

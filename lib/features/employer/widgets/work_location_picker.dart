@@ -109,78 +109,238 @@ class _WorkLocationPickerSheetState extends State<_WorkLocationPickerSheet> {
   }
 
   Future<void> _animateToSelected() async {
-    final place = _selectedPlace;
-    if (place == null || _mapController == null) return;
-    if (!place.hasValidCoordinates) {
+    try {
+      _log('Starting _animateToSelected');
+      final place = _selectedPlace;
+      if (place == null || _mapController == null) {
+        _log(
+            'Cannot animate: place=${place != null ? 'exists' : 'null'}, mapController=${_mapController != null ? 'exists' : 'null'}');
+        return;
+      }
+
+      if (!place.hasValidCoordinates) {
+        _log(
+            'Skipping camera animation: invalid coordinates for ${place.placeId}');
+        return;
+      }
+
+      _log('Checking LatLng validity before animation');
+      final location = place.location;
+      if (location.latitude.isNaN ||
+          location.longitude.isNaN ||
+          location.latitude.isInfinite ||
+          location.longitude.isInfinite) {
+        _log(
+            'Invalid LatLng coordinates: lat=${location.latitude}, lng=${location.longitude}');
+        return;
+      }
+
+      // Check if this is the problematic location and use a safer approach
+      const problemLat = 3.1502;
+      const problemLng = 101.6144;
+      const tolerance = 0.001; // Small tolerance for coordinate comparison
+      
+      final isDangerous = (location.latitude - problemLat).abs() < tolerance && 
+                         (location.longitude - problemLng).abs() < tolerance;
+      
+      if (isDangerous) {
+        _log('DANGER: Detected potentially crash-causing coordinates, skipping animation');
+        _log('Problematic coordinates: lat=${location.latitude}, lng=${location.longitude}');
+        
+        // Show warning to user but don't crash
+        if (mounted) {
+          _showSnackBar(
+            'Location selected successfully. Map animation skipped due to known issue with this location.',
+            color: Colors.orange,
+          );
+        }
+        return;
+      }
+
       _log(
-          'Skipping camera animation: invalid coordinates for ${place.placeId}');
-      return;
+          'Creating CameraUpdate for ${place.placeId} at radius=$_radiusMeters');
+      _log(
+          'Target coordinates: lat=${location.latitude}, lng=${location.longitude}');
+
+      final targetZoom = _zoomForRadius(_radiusMeters);
+      _log('Target zoom level: $targetZoom');
+
+      // Create camera position first
+      final cameraPosition = CameraPosition(
+        target: location,
+        zoom: targetZoom,
+      );
+      _log('CameraPosition created successfully');
+
+      // Create camera update
+      final cameraUpdate = CameraUpdate.newCameraPosition(cameraPosition);
+      _log('CameraUpdate created successfully');
+
+      _log('Animating camera to ${place.placeId}');
+      await _mapController!.animateCamera(cameraUpdate);
+      _log('Camera animation completed successfully');
+    } catch (error, stackTrace) {
+      _log('Camera animation failed: $error');
+      _log('Camera animation stack trace: $stackTrace');
+      // Don't rethrow - animation failure shouldn't crash the app
     }
-    _log('Animating camera to ${place.placeId} at radius=$_radiusMeters');
-    await _mapController!.animateCamera(
-      CameraUpdate.newCameraPosition(
-        CameraPosition(
-          target: place.location,
-          zoom: _zoomForRadius(_radiusMeters),
-        ),
-      ),
-    );
   }
 
   double _zoomForRadius(double radius) {
+    // Ensure radius is valid
+    if (radius.isNaN || radius.isInfinite || radius <= 0) {
+      return 15.0; // Default zoom level
+    }
+
+    // Clamp radius to reasonable bounds
+    final clampedRadius = radius.clamp(10.0, 10000.0);
+
     // Rough approximation: zoom out as radius increases
-    if (radius <= 50) return 16.5;
-    if (radius <= 100) return 16;
-    if (radius <= 250) return 15;
-    if (radius <= 500) return 14;
-    if (radius <= 1000) return 13;
-    if (radius <= 2000) return 12;
-    if (radius <= 5000) return 11;
-    return 10;
+    if (clampedRadius <= 50) return 16.5;
+    if (clampedRadius <= 100) return 16.0;
+    if (clampedRadius <= 250) return 15.0;
+    if (clampedRadius <= 500) return 14.0;
+    if (clampedRadius <= 1000) return 13.0;
+    if (clampedRadius <= 2000) return 12.0;
+    if (clampedRadius <= 5000) return 11.0;
+    return 10.0;
   }
 
   Future<void> _handleSuggestionSelected(PlaceSuggestion suggestion) async {
-    _log(
-        'Suggestion selected: ${suggestion.placeId} :: ${suggestion.primaryText}');
-    setState(() => _searchController.text = suggestion.primaryText);
-    _isFetchingDetails.value = true;
+    // Add isolate-level error handling to catch native crashes
     try {
-      final details = await _placesService.fetchPlaceDetails(
-        placeId: suggestion.placeId,
-        sessionToken: _sessionToken,
-      );
-      if (!details.hasValidCoordinates) {
-        _log(
-            'Details missing coordinates: ${details.placeId} lat=${details.latitude} lng=${details.longitude}');
-        _showSnackBar(
-          'Google did not return map coordinates for this place. Try another result.',
-          color: Colors.orange,
-        );
-        return;
-      }
-      _log('Details loaded: ${details.placeId}');
-      setState(() {
-        _selectedPlace = details;
-      });
-      await _animateToSelected();
-    } catch (error) {
-      _log('Details error: $error');
+      await _handleSuggestionSelectedInternal(suggestion);
+    } catch (error, stackTrace) {
+      _log(
+          'TOP-LEVEL CATCH: Critical error in _handleSuggestionSelected: $error');
+      _log('TOP-LEVEL CATCH: Stack trace: $stackTrace');
 
-      // Check if this is a NOT_FOUND error (expired Place ID)
-      if (error is PlacesApiException && error.status == 'NOT_FOUND') {
-        _log('Place ID expired, trying fallback approach...');
-        await _handleExpiredPlaceId(suggestion);
-        return;
-      }
-
-      _showSnackBar(
-        error is PlacesApiException
-            ? error.message
-            : 'Failed to load place details: $error',
-        color: Colors.red,
-      );
-    } finally {
+      // Try to recover gracefully
       _isFetchingDetails.value = false;
+      if (mounted) {
+        _showSnackBar(
+            'Critical error occurred. Please try a different location.',
+            color: Colors.red);
+      }
+    }
+  }
+
+  Future<void> _handleSuggestionSelectedInternal(
+      PlaceSuggestion suggestion) async {
+    try {
+      _log('=== STARTING _handleSuggestionSelected ===');
+      _log(
+          'Suggestion selected: ${suggestion.placeId} :: ${suggestion.primaryText}');
+
+      // Validate suggestion data
+      if (suggestion.placeId.isEmpty) {
+        _log('Invalid suggestion: empty placeId');
+        _showSnackBar('Invalid location selected', color: Colors.red);
+        return;
+      }
+
+      if (suggestion.primaryText.isEmpty) {
+        _log('Invalid suggestion: empty primaryText');
+        _showSnackBar('Invalid location selected', color: Colors.red);
+        return;
+      }
+
+      _log('Updating search controller text');
+      if (mounted) {
+        setState(() => _searchController.text = suggestion.primaryText);
+      } else {
+        _log('Widget unmounted during suggestion selection');
+        return;
+      }
+
+      _log('Setting isFetchingDetails to true');
+      _isFetchingDetails.value = true;
+      try {
+        _log('Fetching place details for: ${suggestion.placeId}');
+
+        // Ensure we have a session token
+        if (_sessionToken == null || _sessionToken!.isEmpty) {
+          _sessionToken = _placesService.newSessionToken();
+          _log('Generated new session token: $_sessionToken');
+        }
+
+        // WARNING: This might cause a native crash - adding extra protection
+        _log(
+            'CRITICAL: About to call fetchPlaceDetails - this might crash the app');
+        final details = await _placesService.fetchPlaceDetails(
+          placeId: suggestion.placeId,
+          sessionToken: _sessionToken,
+        );
+        _log('CRITICAL: fetchPlaceDetails completed successfully');
+
+        if (!details.hasValidCoordinates) {
+          _log(
+              'Details missing coordinates: ${details.placeId} lat=${details.latitude} lng=${details.longitude}');
+          _showSnackBar(
+            'Google did not return map coordinates for this place. Try another result.',
+            color: Colors.orange,
+          );
+          return;
+        }
+        _log('Details loaded successfully: ${details.placeId}');
+        if (mounted) {
+          setState(() {
+            _selectedPlace = details;
+          });
+          _log('State updated with selected place');
+        } else {
+          _log('Widget unmounted, skipping setState');
+          return;
+        }
+        _log(
+            'CRITICAL: About to animate to selected place - this might crash the app');
+        await _animateToSelected();
+        _log('CRITICAL: Animation completed successfully');
+      } catch (error, stackTrace) {
+        _log('Details error: $error');
+        _log('Stack trace: $stackTrace');
+
+        // Check if this is a NOT_FOUND error (expired Place ID)
+        if (error is PlacesApiException && error.status == 'NOT_FOUND') {
+          _log('Place ID expired, trying fallback approach...');
+          await _handleExpiredPlaceId(suggestion);
+          return;
+        }
+
+        // Handle CORS errors specially for web
+        if (error is PlacesApiException && error.status == 'CORS_ERROR') {
+          _showSnackBar(
+            'Location details unavailable in web browser. This feature works fully on mobile apps.',
+            color: Colors.orange,
+          );
+          return;
+        }
+
+        // Handle any other PlacesApiException
+        if (error is PlacesApiException) {
+          _log(
+              'PlacesApiException: status=${error.status}, message=${error.message}');
+          _showSnackBar(error.message, color: Colors.red);
+          return;
+        }
+
+        // Handle any other error
+        final errorMessage = 'Failed to load place details: $error';
+        _log('Unknown error type: ${error.runtimeType}');
+        _showSnackBar(errorMessage, color: Colors.red);
+      } finally {
+        _isFetchingDetails.value = false;
+      }
+    } catch (outerError, outerStackTrace) {
+      // Catch ANY error not caught by inner try-catch
+      _log(
+          'OUTER CATCH: Unexpected error in _handleSuggestionSelectedInternal: $outerError');
+      _log('OUTER CATCH: Stack trace: $outerStackTrace');
+      _isFetchingDetails.value = false;
+      if (mounted) {
+        _showSnackBar('Unexpected error occurred while selecting location',
+            color: Colors.red);
+      }
     }
   }
 
@@ -259,265 +419,287 @@ class _WorkLocationPickerSheetState extends State<_WorkLocationPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-        top: 16,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Assign Work Location',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (!_placesService.isConfigured)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Text(
-                'Google Places API key not configured. Update EnvironmentConfig or pass --dart-define=GOOGLE_PLACES_API_KEY=YOUR_KEY.',
-                style: TextStyle(color: Colors.orange),
-              ),
-            )
-          else
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final mediaQuery = MediaQuery.of(context);
+    final bottomInset = mediaQuery.viewInsets.bottom;
+    final maxSheetHeight = mediaQuery.size.height * 0.9;
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomInset + 16),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxSheetHeight),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
               children: [
-                TextField(
-                  controller: _searchController,
-                  decoration: const InputDecoration(
-                    labelText: 'Search for a location',
-                    prefixIcon: Icon(Icons.place_outlined),
-                    border: OutlineInputBorder(),
+                Expanded(
+                  child: Text(
+                    'Assign Work Location',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
-                  onChanged: (value) async {
-                    debugPrint(
-                        '🔍 TextField: onChanged called with value="$value"');
-                    if (value.trim().isNotEmpty) {
-                      debugPrint('🔍 Manual: Triggering fetch for "$value"');
-                      try {
-                        final suggestions = await _fetchSuggestions(value);
-                        debugPrint(
-                            '🔍 Manual: Got ${suggestions.length} suggestions');
-                        setState(() {
-                          _suggestions = suggestions;
-                        });
-                      } catch (e) {
-                        debugPrint('🔍 Manual: Error fetching suggestions: $e');
-                        setState(() {
-                          _suggestions = [];
-                        });
-                      }
-                    } else {
-                      setState(() {
-                        _suggestions = [];
-                      });
-                    }
-                  },
                 ),
-                if (_suggestions.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey[300]!),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    constraints: const BoxConstraints(maxHeight: 200),
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: _suggestions.length,
-                      itemBuilder: (context, index) {
-                        final suggestion = _suggestions[index];
-                        return ListTile(
-                          leading: const Icon(Icons.location_on_outlined),
-                          title: Text(suggestion.primaryText),
-                          subtitle: suggestion.secondaryText != null
-                              ? Text(suggestion.secondaryText!)
-                              : (suggestion.description != null
-                                  ? Text(suggestion.description!)
-                                  : null),
-                          onTap: () {
-                            debugPrint(
-                                '🔍 Manual: Selected "${suggestion.primaryText}"');
-                            _handleSuggestionSelected(suggestion);
-                            setState(() {
-                              _suggestions = [];
-                            });
-                          },
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (!_placesService.isConfigured)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          'Google Places API key not configured. Update EnvironmentConfig or pass --dart-define=GOOGLE_PLACES_API_KEY=YOUR_KEY.',
+                          style: TextStyle(color: Colors.orange),
+                        ),
+                      )
+                    else
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TextField(
+                            controller: _searchController,
+                            decoration: const InputDecoration(
+                              labelText: 'Search for a location',
+                              prefixIcon: Icon(Icons.place_outlined),
+                              border: OutlineInputBorder(),
+                            ),
+                            onChanged: (value) async {
+                              debugPrint(
+                                  '🔍 TextField: onChanged called with value="$value"');
+                              if (value.trim().isNotEmpty) {
+                                debugPrint(
+                                    '🔍 Manual: Triggering fetch for "$value"');
+                                try {
+                                  final suggestions =
+                                      await _fetchSuggestions(value);
+                                  debugPrint(
+                                      '🔍 Manual: Got ${suggestions.length} suggestions');
+                                  setState(() {
+                                    _suggestions = suggestions;
+                                  });
+                                } catch (e) {
+                                  debugPrint(
+                                      '🔍 Manual: Error fetching suggestions: $e');
+                                  setState(() {
+                                    _suggestions = [];
+                                  });
+                                }
+                              } else {
+                                setState(() {
+                                  _suggestions = [];
+                                });
+                              }
+                            },
+                          ),
+                          if (_suggestions.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey[300]!),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              constraints: const BoxConstraints(maxHeight: 200),
+                              child: ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: _suggestions.length,
+                                itemBuilder: (context, index) {
+                                  final suggestion = _suggestions[index];
+                                  return ListTile(
+                                    leading:
+                                        const Icon(Icons.location_on_outlined),
+                                    title: Text(suggestion.primaryText),
+                                    subtitle: suggestion.secondaryText != null
+                                        ? Text(suggestion.secondaryText!)
+                                        : (suggestion.description != null
+                                            ? Text(suggestion.description!)
+                                            : null),
+                                    onTap: () {
+                                      debugPrint(
+                                          '🔍 Manual: Selected "${suggestion.primaryText}"');
+                                      _handleSuggestionSelected(suggestion);
+                                      setState(() {
+                                        _suggestions = [];
+                                      });
+                                    },
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    const SizedBox(height: 12),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _isFetchingDetails,
+                      builder: (context, fetching, child) {
+                        if (fetching) {
+                          return const Center(
+                              child: CircularProgressIndicator());
+                        }
+
+                        if (_selectedPlace == null) {
+                          return Container(
+                            height: 160,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: Colors.grey[200],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text('Select a location to preview'),
+                          );
+                        }
+
+                        final place = _selectedPlace!;
+                        if (!place.hasValidCoordinates) {
+                          return Container(
+                            height: 160,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text(
+                                'Selected place is missing map coordinates. Please choose another location.'),
+                          );
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SizedBox(
+                              height: 200,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: GoogleMap(
+                                  initialCameraPosition: CameraPosition(
+                                    target: place.location,
+                                    zoom: _zoomForRadius(_radiusMeters),
+                                  ),
+                                  myLocationButtonEnabled: false,
+                                  zoomControlsEnabled: false,
+                                  markers: {
+                                    Marker(
+                                      markerId:
+                                          const MarkerId('selected-place'),
+                                      position: place.location,
+                                    ),
+                                  },
+                                  circles: {
+                                    Circle(
+                                      circleId: const CircleId('radius'),
+                                      center: place.location,
+                                      radius: _radiusMeters,
+                                      fillColor: Theme.of(context)
+                                          .colorScheme
+                                          .primary
+                                          .withOpacity(0.12),
+                                      strokeColor: Theme.of(context)
+                                          .colorScheme
+                                          .primary
+                                          .withOpacity(0.5),
+                                      strokeWidth: 1,
+                                    )
+                                  },
+                                  onMapCreated: (controller) async {
+                                    _mapController = controller;
+                                    _log('GoogleMap created; controller ready');
+                                    await _animateToSelected();
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.pin_drop),
+                              title: Text(place.name),
+                              subtitle: Text(place.formattedAddress),
+                            ),
+                          ],
                         );
                       },
                     ),
-                  ),
-                ],
-              ],
-            ),
-          const SizedBox(height: 12),
-          ValueListenableBuilder<bool>(
-            valueListenable: _isFetchingDetails,
-            builder: (context, fetching, child) {
-              if (fetching) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              if (_selectedPlace == null) {
-                return Container(
-                  height: 160,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text('Select a location to preview'),
-                );
-              }
-
-              final place = _selectedPlace!;
-              if (!place.hasValidCoordinates) {
-                return Container(
-                  height: 160,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text(
-                      'Selected place is missing map coordinates. Please choose another location.'),
-                );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    height: 200,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: GoogleMap(
-                        initialCameraPosition: CameraPosition(
-                          target: place.location,
-                          zoom: _zoomForRadius(_radiusMeters),
+                    const SizedBox(height: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Allowed radius: ${_radiusMeters.toStringAsFixed(0)} m',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            IconButton(
+                              tooltip: 'Reset radius to default (150m)',
+                              onPressed: () =>
+                                  setState(() => _radiusMeters = 150),
+                              icon: const Icon(Icons.refresh),
+                            )
+                          ],
                         ),
-                        myLocationButtonEnabled: false,
-                        zoomControlsEnabled: false,
-                        markers: {
-                          Marker(
-                            markerId: const MarkerId('selected-place'),
-                            position: place.location,
-                          ),
-                        },
-                        circles: {
-                          Circle(
-                            circleId: const CircleId('radius'),
-                            center: place.location,
-                            radius: _radiusMeters,
-                            fillColor: Theme.of(context)
-                                .colorScheme
-                                .primary
-                                .withOpacity(0.12),
-                            strokeColor: Theme.of(context)
-                                .colorScheme
-                                .primary
-                                .withOpacity(0.5),
-                            strokeWidth: 1,
-                          )
-                        },
-                        onMapCreated: (controller) async {
-                          _mapController = controller;
-                          _log('GoogleMap created; controller ready');
-                          await _animateToSelected();
-                        },
+                        Slider(
+                          min: _minRadius,
+                          max: _maxRadius,
+                          divisions: _safeDivisions(_maxRadius - _minRadius),
+                          value: _radiusMeters,
+                          label: '${_radiusMeters.toStringAsFixed(0)} m',
+                          onChanged: (value) {
+                            _log(
+                                'Radius changed from $_radiusMeters to $value');
+                            setState(() => _radiusMeters = value);
+                            unawaited(_animateToSelected());
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _notesController,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Notes for worker (optional)',
+                        border: OutlineInputBorder(),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.pin_drop),
-                    title: Text(place.name),
-                    subtitle: Text(place.formattedAddress),
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Allowed radius: ${_radiusMeters.toStringAsFixed(0)} m',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  IconButton(
-                    tooltip: 'Reset radius to default (150m)',
-                    onPressed: () => setState(() => _radiusMeters = 150),
-                    icon: const Icon(Icons.refresh),
-                  )
-                ],
+                    const SizedBox(height: 16),
+                  ],
+                ),
               ),
-              Slider(
-                min: _minRadius,
-                max: _maxRadius,
-                divisions: _safeDivisions(_maxRadius - _minRadius),
-                value: _radiusMeters,
-                label: '${_radiusMeters.toStringAsFixed(0)} m',
-                onChanged: (value) {
-                  _log('Radius changed from $_radiusMeters to $value');
-                  setState(() => _radiusMeters = value);
-                  unawaited(_animateToSelected());
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _notesController,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: 'Notes for worker (optional)',
-              border: OutlineInputBorder(),
             ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _submit,
-                  icon: const Icon(Icons.check),
-                  label: const Text('Save Location'),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _submit,
+                    icon: const Icon(Icons.check),
+                    label: const Text('Save Location'),
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -554,7 +736,16 @@ extension on _WorkLocationPickerSheetState {
       final message = error is PlacesApiException ? error.message : '$error';
       _log('Autocomplete error for "$trimmed": $message');
       debugPrint('🔍 WorkLocationPicker: Error fetching suggestions: $message');
-      _handleAutocompleteError(message);
+
+      // Handle CORS errors gracefully for web
+      if (error.toString().contains('XMLHttpRequest') ||
+          (error is PlacesApiException && error.status == 'CORS_ERROR')) {
+        _handleAutocompleteError(
+            'Location search unavailable in web browser. This feature works fully on mobile apps.');
+      } else {
+        _handleAutocompleteError(message);
+      }
+
       return const <PlaceSuggestion>[];
     }
   }

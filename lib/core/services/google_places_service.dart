@@ -78,53 +78,70 @@ class GooglePlacesService {
     debugPrint('👉 Places request URL: $uri');
     debugPrint('🔍 GooglePlaces: Query parameters: $query');
 
-    final response = await _client.get(uri).timeout(_timeout,
-        onTimeout: () => throw const PlacesApiException(
-            'Places autocomplete request timed out'));
+    try {
+      final response = await _client.get(uri).timeout(_timeout,
+          onTimeout: () => throw const PlacesApiException(
+              'Places autocomplete request timed out'));
 
-    _log(
-        'Autocomplete response status=${response.statusCode} body=${response.body}');
-    debugPrint('🔍 GooglePlaces: Response status=${response.statusCode}');
-    debugPrint('🔍 GooglePlaces: Response body=${response.body}');
+      _log(
+          'Autocomplete response status=${response.statusCode} body=${response.body}');
+      debugPrint('🔍 GooglePlaces: Response status=${response.statusCode}');
+      debugPrint('🔍 GooglePlaces: Response body=${response.body}');
 
-    if (response.statusCode != 200) {
-      throw PlacesApiException(
-        'Places autocomplete failed with status code ${response.statusCode}: ${response.body}',
-      );
-    }
+      if (response.statusCode != 200) {
+        throw PlacesApiException(
+          'Places autocomplete failed with status code ${response.statusCode}: ${response.body}',
+        );
+      }
 
-    final payload = jsonDecode(response.body) as Map<String, dynamic>;
-    final status = payload['status']?.toString();
-    if (status != 'OK' && status != 'ZERO_RESULTS') {
-      final errorMessage = payload['error_message']?.toString();
-      throw PlacesApiException(
-        _friendlyAutocompleteError(status, errorMessage),
-        status: status,
-      );
-    }
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      final status = payload['status']?.toString();
+      if (status != 'OK' && status != 'ZERO_RESULTS') {
+        final errorMessage = payload['error_message']?.toString();
+        throw PlacesApiException(
+          _friendlyAutocompleteError(status, errorMessage),
+          status: status,
+        );
+      }
 
-    final predictions = (payload['predictions'] as List?) ?? const <dynamic>[];
+      final predictions =
+          (payload['predictions'] as List?) ?? const <dynamic>[];
 
-    // Safe parsing of predictions to prevent NaN values
-    final suggestions = <PlaceSuggestion>[];
-    for (final prediction in predictions) {
-      if (prediction is Map<String, dynamic>) {
-        try {
-          final suggestion = PlaceSuggestion.fromJson(prediction);
-          // Only add valid suggestions
-          if (suggestion.placeId.isNotEmpty &&
-              suggestion.primaryText.isNotEmpty) {
-            suggestions.add(suggestion);
+      // Safe parsing of predictions to prevent NaN values
+      final suggestions = <PlaceSuggestion>[];
+      for (final prediction in predictions) {
+        if (prediction is Map<String, dynamic>) {
+          try {
+            final suggestion = PlaceSuggestion.fromJson(prediction);
+            // Only add valid suggestions
+            if (suggestion.placeId.isNotEmpty &&
+                suggestion.primaryText.isNotEmpty) {
+              suggestions.add(suggestion);
+            }
+          } catch (e) {
+            _log('Warning: Skipped invalid prediction: $e');
+            // Continue processing other predictions
           }
-        } catch (e) {
-          _log('Warning: Skipped invalid prediction: $e');
-          // Continue processing other predictions
         }
       }
-    }
 
-    _log('Autocomplete success: ${suggestions.length} suggestion(s)');
-    return suggestions;
+      _log('Autocomplete success: ${suggestions.length} suggestion(s)');
+      return suggestions;
+    } catch (e) {
+      _log('Autocomplete error: $e');
+
+      // Handle CORS errors in web browsers
+      if (kIsWeb && e.toString().contains('XMLHttpRequest')) {
+        _log('Web CORS error detected - Google Places API blocked by browser');
+        debugPrint(
+            '🌐 Web CORS Error: Google Places API blocked by browser. Consider using a proxy server for production.');
+
+        // Return empty list instead of crashing
+        return const <PlaceSuggestion>[];
+      }
+
+      rethrow;
+    }
   }
 
   Future<PlaceDetails> fetchPlaceDetails({
@@ -132,59 +149,94 @@ class GooglePlacesService {
     String? sessionToken,
     String language = 'en',
   }) async {
-    _assertConfigured();
-
-    final query = <String, String>{
-      'place_id': placeId,
-      'key': _apiKey,
-      'language': language,
-      'fields':
-          'place_id,name,formatted_address,geometry,plus_code,types,address_component',
-    };
-
-    if (sessionToken != null) {
-      query['sessiontoken'] = sessionToken;
-    }
-
-    final uri = Uri.https('maps.googleapis.com', _detailsPath, query);
-    _log('Details request for placeId=$placeId → $uri');
-    final response = await _client.get(uri).timeout(_timeout,
-        onTimeout: () =>
-            throw const PlacesApiException('Places details request timed out'));
-
-    if (response.statusCode != 200) {
-      throw PlacesApiException(
-        'Places details failed with status code ${response.statusCode}',
-      );
-    }
-
-    final payload = jsonDecode(response.body) as Map<String, dynamic>;
-    final status = payload['status']?.toString();
-    if (status != 'OK') {
-      final errorMessage = payload['error_message']?.toString();
-      throw PlacesApiException(
-        _friendlyDetailsError(status, errorMessage),
-        status: status,
-      );
-    }
-
-    PlaceDetails details;
     try {
-      details = PlaceDetails.fromJson(payload);
-      // Validate that coordinates are safe
-      if (!details.hasValidCoordinates) {
-        throw PlacesApiException(
-          'Place details contain invalid coordinates: lat=${details.latitude}, lng=${details.longitude}',
-        );
+      debugPrint('🌍 GooglePlaces: Starting fetchPlaceDetails for $placeId');
+      _assertConfigured();
+
+      final query = <String, String>{
+        'place_id': placeId,
+        'key': _apiKey,
+        'language': language,
+        'fields':
+            'place_id,name,formatted_address,geometry,plus_code,types,address_component',
+      };
+
+      if (sessionToken != null) {
+        query['sessiontoken'] = sessionToken;
+      }
+
+      final uri = Uri.https('maps.googleapis.com', _detailsPath, query);
+      _log('Details request for placeId=$placeId → $uri');
+      debugPrint('🌍 GooglePlaces: Making details request');
+
+      try {
+        final response = await _client.get(uri).timeout(_timeout,
+            onTimeout: () => throw const PlacesApiException(
+                'Places details request timed out'));
+
+        debugPrint(
+            '🌍 GooglePlaces: Details response status: ${response.statusCode}');
+
+        if (response.statusCode != 200) {
+          throw PlacesApiException(
+            'Places details failed with status code ${response.statusCode}',
+          );
+        }
+
+        final payload = jsonDecode(response.body) as Map<String, dynamic>;
+        final status = payload['status']?.toString();
+        debugPrint('🌍 GooglePlaces: Details API status: $status');
+
+        if (status != 'OK') {
+          final errorMessage = payload['error_message']?.toString();
+          throw PlacesApiException(
+            _friendlyDetailsError(status, errorMessage),
+            status: status,
+          );
+        }
+
+        debugPrint('🌍 GooglePlaces: Parsing place details JSON');
+        PlaceDetails details;
+        try {
+          details = PlaceDetails.fromJson(payload);
+          debugPrint('🌍 GooglePlaces: Place details parsed successfully');
+
+          // Validate that coordinates are safe
+          if (!details.hasValidCoordinates) {
+            throw PlacesApiException(
+              'Place details contain invalid coordinates: lat=${details.latitude}, lng=${details.longitude}',
+            );
+          }
+        } catch (e) {
+          _log('Failed to parse place details: $e');
+          throw PlacesApiException('Failed to parse place details: $e');
+        }
+
+        _log(
+            'Details success: ${details.placeId} (${details.name}) @ ${details.location}');
+        debugPrint('🌍 GooglePlaces: fetchPlaceDetails completed successfully');
+        return details;
+      } catch (httpError) {
+        debugPrint('🌍 GooglePlaces: HTTP/API error: $httpError');
+        rethrow;
       }
     } catch (e) {
-      _log('Failed to parse place details: $e');
-      throw PlacesApiException('Failed to parse place details: $e');
-    }
+      // Handle CORS errors in web browsers
+      if (kIsWeb && e.toString().contains('XMLHttpRequest')) {
+        _log('Web CORS error detected - cannot fetch place details in browser');
+        debugPrint(
+            '🌐 Web CORS Error: Google Places API blocked by browser. Consider using a proxy server for production.');
 
-    _log(
-        'Details success: ${details.placeId} (${details.name}) @ ${details.location}');
-    return details;
+        // Instead of returning mock data that could cause issues, throw a clear error
+        throw PlacesApiException(
+          'Google Places API is blocked by browser CORS policy. This feature requires a backend proxy server for web deployment.',
+          status: 'CORS_ERROR',
+        );
+      }
+
+      // Re-throw other errors
+      rethrow;
+    }
   }
 
   static void _log(String message) {

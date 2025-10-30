@@ -238,29 +238,74 @@ class ApiMessagingService extends BaseApiService implements MessagingService {
   Future<void> markNotificationsAsRead(
       {required String userId, List<String>? notificationIds}) async {
     try {
-      const endpoint = 'api/notifications/read';
-      final requestHeaders = headers(authToken: _authToken);
-      final body = {
-        'userId': userId,
-        if (notificationIds != null && notificationIds.isNotEmpty)
-          'notificationIds': notificationIds,
-      };
+      List<String> idsToMarkAsRead = [];
 
-      logApiCall('POST', endpoint, requestBody: body, headers: requestHeaders);
+      // If no specific notification IDs are provided, get all unread notifications
+      if (notificationIds == null || notificationIds.isEmpty) {
+        debugPrint(
+            'No notification IDs provided, fetching all unread notifications');
 
-      final response = await client.post(
-        resolve(endpoint),
-        headers: requestHeaders,
-        body: jsonEncode(body),
-      );
+        // Get all notifications for the user
+        const endpoint = 'api/notifications';
+        final requestHeaders = headers(authToken: _authToken);
 
-      if (response.statusCode != 200) {
-        throw Exception(
-            'Failed to mark notifications as read: ${response.body}');
+        final response = await client.get(
+          resolve(endpoint),
+          headers: requestHeaders,
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final notifications = data['data'] as List<dynamic>? ?? [];
+
+          // Filter for unread notifications (those without readAt field)
+          idsToMarkAsRead = notifications
+              .where((notif) => notif['readAt'] == null)
+              .map((notif) => notif['_id'] as String)
+              .toList();
+
+          debugPrint(
+              'Found ${idsToMarkAsRead.length} unread notifications to mark as read');
+        } else {
+          debugPrint('Failed to fetch notifications: ${response.statusCode}');
+          return;
+        }
+      } else {
+        idsToMarkAsRead = notificationIds;
       }
+
+      // Mark each notification individually since the backend API requires
+      // PATCH /api/notifications/:notificationId/read format
+      int successCount = 0;
+      int failureCount = 0;
+
+      for (final notificationId in idsToMarkAsRead) {
+        final endpoint = 'api/notifications/$notificationId/read';
+        final requestHeaders = headers(authToken: _authToken);
+
+        logApiCall('PATCH', endpoint, headers: requestHeaders);
+
+        final response = await client.patch(
+          resolve(endpoint),
+          headers: requestHeaders,
+        );
+
+        if (response.statusCode != 200) {
+          debugPrint(
+              'Failed to mark notification $notificationId as read: ${response.body}');
+          failureCount++;
+        } else {
+          debugPrint(
+              'Successfully marked notification $notificationId as read');
+          successCount++;
+        }
+      }
+
+      debugPrint(
+          'Notification marking summary: $successCount success, $failureCount failures out of ${idsToMarkAsRead.length} total');
     } catch (e) {
       debugPrint('Error marking notifications as read: $e');
-      rethrow;
+      // Don't rethrow to avoid breaking the app flow
     }
   }
 

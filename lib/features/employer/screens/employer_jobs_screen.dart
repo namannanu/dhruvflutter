@@ -7,6 +7,8 @@ import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/features/employer/screens/employee_hire_application_screen.dart';
 import 'package:talent/features/employer/screens/employer_job_create_screen.dart';
+import 'package:talent/features/employer/screens/job_payment_screen.dart';
+import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/shared/mixins/auto_refresh_mixin.dart';
 import 'package:talent/core/services/permission_service.dart';
@@ -362,150 +364,220 @@ class _JobTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final statusColor = _statusColor(context, job.status);
+    final needsPayment = job.premiumRequired;
+    final statusColor =
+        needsPayment ? Colors.orange : _statusColor(context, job.status);
+    final statusLabel = needsPayment ? 'Payment pending' : job.status.name;
     final formatter = DateFormat('MMM d · HH:mm');
     final appState = context.watch<AppState>();
-    final accessInfo = appState.ownershipAccessInfo(job.businessId);
+    final accessInfo = appState.jobAccessInfo(job);
+    BusinessLocation? business;
+    for (final candidate in appState.businesses) {
+      if (candidate.id == job.businessId) {
+        business = candidate;
+        break;
+      }
+    }
+
+    final businessLogoUrl = job.businessLogoSquareUrl ??
+        job.businessLogoUrl ??
+        job.businessLogoOriginalUrl ??
+        business?.logoSquareUrl ??
+        business?.logoUrl ??
+        business?.logoOriginalUrl;
+    final businessDisplayName = job.businessName.isNotEmpty
+        ? job.businessName
+        : business?.name ?? job.title;
 
     return AccessTagPositioned(
-        accessInfo: accessInfo,
-        child: Material(
-          child: Card(
-            child: InkWell(
-              onTap: () => context.read<AppState>().selectJob(job.id),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                job.title,
-                                style: theme.textTheme.titleMedium,
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 2,
-                              ),
-                              if (job.businessName.isNotEmpty)
-                                Text(
-                                  job.businessName,
-                                  style: theme.textTheme.bodySmall,
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 1,
-                                ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: statusColor.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            job.status.name,
-                            style: TextStyle(
-                              color: statusColor,
-                              fontWeight: FontWeight.w600,
+      accessInfo: null,
+      child: Material(
+        child: Card(
+          child: InkWell(
+            onTap: () => context.read<AppState>().selectJob(job.id),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      BusinessLogoAvatar(
+                        logoUrl: businessLogoUrl,
+                        name: businessDisplayName,
+                        size: 44,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              job.title,
+                              style: theme.textTheme.titleMedium,
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 2,
                             ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
+                            if (job.businessName.isNotEmpty)
+                              Text(
+                                job.businessName,
+                                style: theme.textTheme.bodySmall,
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                          ],
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      job.description,
-                      style: theme.textTheme.bodyMedium,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Icon(Icons.access_time,
-                            size: 16, color: theme.colorScheme.outline),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            '${formatter.format(job.scheduleStart)} - ${formatter.format(job.scheduleEnd)}',
-                            style: theme.textTheme.bodySmall,
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: statusColor.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              statusLabel,
+                              style: TextStyle(
+                                color: statusColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
                           ),
+                          if (accessInfo != null) ...[
+                            const SizedBox(height: 8),
+                            AccessTag(
+                              accessInfo: accessInfo,
+                              size: AccessTagSize.small,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    job.description,
+                    style: theme.textTheme.bodyMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(Icons.access_time,
+                          size: 16, color: theme.colorScheme.outline),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          '${formatter.format(job.scheduleStart)} - ${formatter.format(job.scheduleEnd)}',
+                          style: theme.textTheme.bodySmall,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
-                        Text(
-                          '\$${job.hourlyRate.toStringAsFixed(0)}/hr',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                      ),
+                      Text(
+                        '\$${job.hourlyRate.toStringAsFixed(0)}/hr',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: job.status == JobStatus.active
-                              ? () {
-                                  print(
-                                      'Close button pressed for job: ${job.id}, status: ${job.status}');
-                                  onCloseJob(context, job);
-                                }
-                              : null,
-                          icon: Icon(
-                            Icons.close,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: job.status == JobStatus.active
+                            ? () {
+                                print(
+                                    'Close button pressed for job: ${job.id}, status: ${job.status}');
+                                onCloseJob(context, job);
+                              }
+                            : null,
+                        icon: Icon(
+                          Icons.close,
+                          color: job.status == JobStatus.active
+                              ? Colors.red
+                              : Colors.grey,
+                        ),
+                        label: Text(
+                          job.status == JobStatus.active
+                              ? 'Close Job'
+                              : 'Closed',
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: job.status == JobStatus.active
+                              ? Colors.red
+                              : Colors.grey,
+                          side: BorderSide(
                             color: job.status == JobStatus.active
                                 ? Colors.red
                                 : Colors.grey,
                           ),
-                          label: Text(
-                            job.status == JobStatus.active
-                                ? 'Close Job'
-                                : 'Closed',
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: job.status == JobStatus.active
-                                ? Colors.red
-                                : Colors.grey,
-                            side: BorderSide(
-                              color: job.status == JobStatus.active
-                                  ? Colors.red
-                                  : Colors.grey,
-                            ),
-                          ),
                         ),
+                      ),
+                      if (needsPayment)
                         OutlinedButton.icon(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Trigger POST /payments/job-posting when quota ends.',
+                          onPressed: () async {
+                            final paymentCompleted =
+                                await Navigator.of(context).push<bool>(
+                              MaterialPageRoute(
+                                builder: (context) => JobPaymentScreen(
+                                  jobId: job.id,
+                                  amount: 50.0,
+                                  currency: 'INR',
                                 ),
                               ),
                             );
+                            if (paymentCompleted == true && context.mounted) {
+                              await context
+                                  .read<AppState>()
+                                  .refreshActiveRole();
+                            }
                           },
                           icon: const Icon(Icons.credit_card_outlined),
                           label: const Text('Pay & publish'),
+                        )
+                      else
+                        OutlinedButton.icon(
+                          onPressed: null,
+                          icon: Icon(
+                            Icons.check_circle,
+                            color: theme.colorScheme.primary,
+                          ),
+                          label: Text(
+                            'Published',
+                            style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            disabledForegroundColor: theme.colorScheme.primary,
+                            side: BorderSide(
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
                         ),
-                      ],
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
-        ));
+        ),
+      ),
+    );
   }
 }
 

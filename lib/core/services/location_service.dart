@@ -1,9 +1,12 @@
 // ignore_for_file: avoid_print
 
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:talent/core/models/location.dart';
+import 'package:talent/core/widgets/ios_location_permission_dialog.dart';
 
 /// Service for handling geolocation functionality
 class LocationService {
@@ -15,20 +18,41 @@ class LocationService {
 
   LocationService._();
 
-  /// Check if location services are enabled
+  /// Check if location services are enabled and handle iOS accuracy
   Future<bool> isLocationServiceEnabled() async {
     try {
-      return await Geolocator.isLocationServiceEnabled();
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return false;
+
+      // Handle iOS accuracy status
+      try {
+        final accuracy = await Geolocator.getLocationAccuracy();
+        if (accuracy == LocationAccuracyStatus.reduced) {
+          // Request temporary full accuracy when needed
+          final result = await Geolocator.requestTemporaryFullAccuracy(
+            purposeKey: 'WorkerAttendance',
+          );
+          print('📍 LocationService: Requested full accuracy: $result');
+        }
+      } catch (e) {
+        print('⚠️ LocationService: Error checking accuracy: $e');
+      }
+
+      return true;
     } catch (e) {
       print('⚠️ LocationService: Error checking service status: $e');
       return false;
     }
   }
 
-  /// Check location permission status
+  /// Check location permission status with proper iOS handling
   Future<LocationPermissionStatus> checkPermission() async {
     try {
       final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.deniedForever) {
+        print('❌ LocationService: Permission permanently denied');
+        return LocationPermissionStatus.permanentlyDenied;
+      }
       return _convertPermission(permission);
     } catch (e) {
       print('⚠️ LocationService: Error checking permissions: $e');
@@ -36,11 +60,30 @@ class LocationService {
     }
   }
 
-  /// Request location permission
-  Future<LocationPermissionStatus> requestPermission() async {
+  /// Request location permission with iOS accuracy handling and user-friendly dialogs
+  Future<LocationPermissionStatus> requestPermission(
+      [BuildContext? context]) async {
     try {
       print('🔐 LocationService: Requesting location permission...');
+
+      // For iOS, show user-friendly dialog first
+      if (Platform.isIOS && context != null) {
+        final hasPermission =
+            await IOSLocationPermissionDialog.ensureLocationPermission(context);
+        if (!hasPermission) {
+          return LocationPermissionStatus.denied;
+        }
+        return LocationPermissionStatus.granted;
+      }
+
       final permission = await Geolocator.requestPermission();
+
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        // For iOS, ensure we have proper accuracy
+        await isLocationServiceEnabled();
+      }
+
       return _convertPermission(permission);
     } catch (e) {
       print('❌ LocationService: Error requesting permission: $e');
@@ -52,6 +95,7 @@ class LocationService {
   Future<Location?> getCurrentLocation({
     Duration timeout = const Duration(seconds: 10),
     double? desiredAccuracy,
+    BuildContext? context,
   }) async {
     try {
       print('📍 LocationService: Getting current location...');
@@ -64,9 +108,8 @@ class LocationService {
       // Check permission
       final permission = await checkPermission();
       if (permission == LocationPermissionStatus.denied) {
-        final requested = await requestPermission();
-        if (requested != LocationPermissionStatus.granted &&
-            requested != LocationPermissionStatus.whileInUse) {
+        final requested = await requestPermission(context);
+        if (requested != LocationPermissionStatus.granted) {
           throw const LocationException('Location permission denied');
         }
       }
@@ -75,6 +118,9 @@ class LocationService {
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: _convertAccuracy(desiredAccuracy),
         timeLimit: timeout,
+      );
+      print(
+        '📍 LocationService: Current position lat=${position.latitude}, lon=${position.longitude}, accuracy=${position.accuracy}',
       );
 
       return Location(
@@ -104,10 +150,12 @@ class LocationService {
   /// Get location with high accuracy for attendance tracking
   Future<Location?> getHighAccuracyLocation({
     Duration timeout = const Duration(seconds: 15),
+    BuildContext? context,
   }) async {
     return getCurrentLocation(
       timeout: timeout,
       desiredAccuracy: 5.0, // 5 meter accuracy
+      context: context,
     );
   }
 
@@ -117,6 +165,9 @@ class LocationService {
   ) async {
     try {
       final currentLocation = await getHighAccuracyLocation();
+      print(
+        '📍 LocationService: Validating against job lat=${jobLocation.latitude}, lon=${jobLocation.longitude}, allowedRadius=${jobLocation.allowedRadius}',
+      );
 
       if (currentLocation == null) {
         return const LocationValidationResult(
@@ -129,6 +180,7 @@ class LocationService {
 
       return jobLocation.validateAttendanceLocation(currentLocation);
     } catch (e) {
+      print('❌ LocationService: Validation error $e');
       return LocationValidationResult(
         isValid: false,
         distance: 0,
@@ -184,13 +236,12 @@ class LocationService {
       case LocationPermission.denied:
         return LocationPermissionStatus.denied;
       case LocationPermission.deniedForever:
-        return LocationPermissionStatus.deniedForever;
+        return LocationPermissionStatus.permanentlyDenied;
       case LocationPermission.whileInUse:
-        return LocationPermissionStatus.whileInUse;
       case LocationPermission.always:
         return LocationPermissionStatus.granted;
       case LocationPermission.unableToDetermine:
-        return LocationPermissionStatus.denied;
+        return LocationPermissionStatus.restricted;
     }
   }
 
@@ -203,14 +254,6 @@ class LocationService {
     if (accuracy <= 50) return LocationAccuracy.medium;
     return LocationAccuracy.low;
   }
-}
-
-/// Location permission status enum
-enum LocationPermissionStatus {
-  denied,
-  deniedForever,
-  whileInUse,
-  granted,
 }
 
 /// Location service exception

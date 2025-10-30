@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/state/app_state.dart';
-import 'package:talent/core/widgets/notification_badge.dart';
 import 'package:talent/features/shared/screens/messaging_screen.dart';
 import 'package:talent/features/shared/screens/notifications_screen.dart';
 import 'package:talent/features/worker/screens/worker_applications_screen.dart';
 import 'package:talent/features/worker/screens/worker_attendance_screen.dart';
 import 'package:talent/features/worker/screens/worker_dashboard_screen.dart';
 import 'package:talent/features/worker/screens/worker_job_feed_screen.dart';
-import 'package:talent/features/worker/screens/worker_profile_screen.dart';
+import 'package:talent/features/worker/screens/worker_settings_screen.dart';
 
 class WorkerShell extends StatefulWidget {
   const WorkerShell({super.key});
@@ -42,8 +41,7 @@ class _WorkerShellState extends State<WorkerShell> {
       const WorkerJobFeedScreen(),
       const WorkerApplicationsScreen(),
       const WorkerAttendanceScreen(),
-      const NotificationsScreen(),
-      const WorkerProfileScreen(),
+      const WorkerSettingsScreen(),
     ];
 
     return Scaffold(
@@ -92,33 +90,27 @@ class _WorkerShellState extends State<WorkerShell> {
           return NavigationBar(
             selectedIndex: _index,
             onDestinationSelected: (i) => setState(() => _index = i),
-            destinations: [
-              const NavigationDestination(
+            destinations: const [
+              NavigationDestination(
                 icon: Icon(Icons.home_outlined),
                 label: 'Dashboard',
               ),
-              const NavigationDestination(
+              NavigationDestination(
                 icon: Icon(Icons.work_outline),
                 label: 'Jobs',
               ),
-              const NavigationDestination(
+              NavigationDestination(
                 icon: Icon(Icons.assignment_outlined),
                 label: 'Applications',
               ),
-              const NavigationDestination(
+              NavigationDestination(
                 icon: Icon(Icons.check_circle_outline),
                 label: 'Attendance',
               ),
-              NotificationNavigationDestination(
-                icon: const Icon(Icons.notifications_outlined),
-                selectedIcon: const Icon(Icons.notifications),
-                label: 'Notifications',
-                unreadCount: appState.unreadNotificationCount,
-              ),
-              const NavigationDestination(
-                icon: Icon(Icons.person_outline),
-                label: 'Profile',
-              ),
+              NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                label: 'Settings',
+              )
             ],
           );
         },

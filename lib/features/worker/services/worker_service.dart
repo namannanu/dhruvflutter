@@ -7,11 +7,17 @@ abstract class WorkerService {
   /// Update worker profile details
   Future<WorkerProfile> updateWorkerProfile({
     required String workerId,
+    String? firstName,
+    String? lastName,
     String? bio,
     List<String>? skills,
     String? experience,
     List<String>? languages,
     String? phone,
+    List<Map<String, dynamic>>? availability,
+    bool? notificationsEnabled,
+    bool? emailNotificationsEnabled,
+    double? preferredRadiusMiles,
   });
 
   /// Fetch jobs available to a worker
@@ -67,8 +73,19 @@ abstract class WorkerService {
   /// Fetch dashboard metrics for a worker
   Future<WorkerDashboardMetrics> fetchWorkerDashboardMetrics(String workerId);
 
-  Future<AttendanceRecord> clockIn(String recordId);
-  Future<AttendanceRecord> clockOut(String recordId, {double? hourlyRate});
+  /// Fetch employment history for the worker
+  Future<List<EmploymentRecord>> fetchEmploymentHistory(String workerId);
+
+  Future<AttendanceRecord> clockIn(
+    String recordId, {
+    required Location location,
+  });
+
+  Future<AttendanceRecord> clockOut(
+    String recordId, {
+    required Location location,
+    double? hourlyRate,
+  });
   Future<AttendanceRecord> updateAttendance(
       String recordId, Map<String, dynamic> body);
 
@@ -83,4 +100,16 @@ abstract class WorkerService {
     required String status,
     String? message,
   });
+
+  /// Submit feedback for an employer
+  Future<EmployerFeedback> submitEmployerFeedback({
+    required String workerId,
+    required String employerId,
+    required int rating,
+    String? comment,
+    String? jobId,
+  });
+
+  /// Fetch submitted feedback by the worker
+  Future<List<EmployerFeedback>> fetchWorkerFeedback(String workerId);
 }

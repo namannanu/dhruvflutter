@@ -3,6 +3,18 @@ allprojects {
         google()
         mavenCentral()
     }
+
+    configurations.configureEach {
+        resolutionStrategy {
+            // Force explicit versions so Gradle does not perform network lookups for dynamic ranges.
+            force(
+                "androidx.test:runner:1.5.2",
+                "androidx.test:rules:1.5.0",
+                "androidx.test.espresso:espresso-core:3.5.1",
+                "com.razorpay:checkout:1.6.33",
+            )
+        }
+    }
 }
 
 val newBuildDir: Directory = rootProject.layout.buildDirectory.dir("../../build").get()

@@ -2,6 +2,8 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+enum LocationPermissionStatus { granted, denied, permanentlyDenied, restricted }
+
 @immutable
 class Location {
   const Location({

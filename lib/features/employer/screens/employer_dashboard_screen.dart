@@ -1,3 +1,8 @@
+// ignore_for_file: use_build_context_synchronously
+
+import 'dart:convert';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +11,7 @@ import 'package:talent/core/state/app_state.dart';
 import 'package:talent/features/employer/widgets/edit_business.dart';
 import 'package:talent/features/employer/widgets/work_location_picker.dart';
 import 'package:talent/features/shared/mixins/auto_refresh_mixin.dart';
+import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 
 class EmployerDashboardScreen extends StatefulWidget {
@@ -76,6 +82,7 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
     final metrics = appState.employerMetrics;
     final profile = appState.employerProfile;
     final businesses = appState.businesses;
+    final currentUser = appState.currentUser;
 
     // Show loading if data is still null
     if (metrics == null || profile == null) {
@@ -86,6 +93,28 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
     }
 
     final number = NumberFormat.compact();
+    BusinessLocation? primaryBusiness;
+    if (businesses.isNotEmpty) {
+      final selectedBusinessId = currentUser?.selectedBusinessId;
+      if (selectedBusinessId != null && selectedBusinessId.isNotEmpty) {
+        primaryBusiness = businesses.firstWhere(
+          (b) => b.id == selectedBusinessId,
+          orElse: () => businesses.first,
+        );
+      } else {
+        primaryBusiness = businesses.first;
+      }
+    }
+    final primaryBusinessName =
+        (primaryBusiness != null && primaryBusiness.name.isNotEmpty)
+            ? primaryBusiness.name
+            : (profile.companyName.isNotEmpty
+                ? profile.companyName
+                : 'Your business');
+
+    final primaryLogoUrl = primaryBusiness?.logoSquareUrl ??
+        primaryBusiness?.logoUrl ??
+        primaryBusiness?.logoOriginalUrl;
 
     return Scaffold(
       appBar: AppBar(
@@ -112,6 +141,11 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
           children: [
             Row(
               children: [
+                BusinessLogoAvatar(
+                  logoUrl: primaryLogoUrl,
+                  name: primaryBusinessName,
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -301,12 +335,22 @@ class _AddBusinessState extends State<_AddBusiness> {
   final _stateController = TextEditingController();
   final _postalController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _logoUrlController = TextEditingController();
 
   PlaceDetails? _selectedPlace;
   bool _submitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    _logoUrlController.addListener(_handleLogoChanged);
+    _nameController.addListener(_handleNameChanged);
+  }
+
+  @override
   void dispose() {
+    _logoUrlController.removeListener(_handleLogoChanged);
+    _nameController.removeListener(_handleNameChanged);
     _nameController.dispose();
     _descriptionController.dispose();
     _addressController.dispose();
@@ -314,6 +358,7 @@ class _AddBusinessState extends State<_AddBusiness> {
     _stateController.dispose();
     _postalController.dispose();
     _phoneController.dispose();
+    _logoUrlController.dispose();
     super.dispose();
   }
 
@@ -323,6 +368,7 @@ class _AddBusinessState extends State<_AddBusiness> {
 
     try {
       final appState = context.read<AppState>();
+      final trimmedLogo = _logoUrlController.text.trim();
       await appState.addBusiness(
         name: _nameController.text.trim(),
         description: _descriptionController.text.trim(),
@@ -331,6 +377,15 @@ class _AddBusinessState extends State<_AddBusiness> {
         state: _stateController.text.trim(),
         postalCode: _postalController.text.trim(),
         phone: _phoneController.text.trim(),
+        logoUrl: trimmedLogo.isEmpty ? null : trimmedLogo,
+        // Include Google Places API location data if available
+        latitude: _selectedPlace?.latitude,
+        longitude: _selectedPlace?.longitude,
+        placeId: _selectedPlace?.placeId,
+        formattedAddress: _selectedPlace?.formattedAddress,
+        allowedRadius: 150.0, // Default 150 meters radius
+        locationName: _selectedPlace?.name,
+        locationNotes: null, // Could add a notes field later
       );
 
       if (!mounted) return;
@@ -345,6 +400,66 @@ class _AddBusinessState extends State<_AddBusiness> {
       );
     } finally {
       if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _handleLogoChanged() {
+    setState(() {});
+  }
+
+  void _handleNameChanged() {
+    setState(() {});
+  }
+
+  Future<void> _pickLogo() async {
+    try {
+      const typeGroup = XTypeGroup(
+        label: 'images',
+        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'],
+      );
+      final file = await openFile(acceptedTypeGroups: [typeGroup]);
+      if (file == null) return;
+
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Selected image is empty.')),
+        );
+        return;
+      }
+
+      final mime = file.mimeType ?? _lookupMimeType(file.name);
+      final dataUrl = 'data:$mime;base64,${base64Encode(bytes)}';
+      setState(() {
+        _logoUrlController.text = dataUrl;
+      });
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to pick image: $error')),
+      );
+    }
+  }
+
+  static String _lookupMimeType(String? extension) {
+    if (extension == null || extension.isEmpty) {
+      return 'image/png';
+    }
+    final lower = extension.toLowerCase();
+    final ext = lower.contains('.') ? lower.split('.').last : lower;
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'webp':
+        return 'image/webp';
+      case 'gif':
+        return 'image/gif';
+      case 'bmp':
+        return 'image/bmp';
+      case 'svg':
+        return 'image/svg+xml';
+      default:
+        return 'image/png';
     }
   }
 
@@ -388,161 +503,230 @@ class _AddBusinessState extends State<_AddBusiness> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.85,
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
+    final mediaQuery = MediaQuery.of(context);
+    final bottomInset = mediaQuery.viewInsets.bottom;
+    final maxSheetHeight = mediaQuery.size.height * 0.9;
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomInset + 16),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxSheetHeight),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                physics: const ClampingScrollPhysics(),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '➕ Add a new business',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 16),
-                    OutlinedButton.icon(
-                      onPressed: _pickLocation,
-                      icon: const Icon(Icons.map_outlined),
-                      label: Text(
-                        _selectedPlace == null
-                            ? 'Search address with Google Maps'
-                            : 'Update address from Google Maps',
+              const SizedBox(height: 16),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  physics: const ClampingScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '➕ Add a new business',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (_selectedPlace != null) ...[
-                      Card(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .primaryContainer
-                            .withValues(alpha: 0.2),
-                        child: ListTile(
-                          leading: const Icon(Icons.place_outlined),
-                          title: Text(_selectedPlace!.name),
-                          subtitle: Text(_selectedPlace!.formattedAddress),
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: _pickLocation,
+                        icon: const Icon(Icons.map_outlined),
+                        label: Text(
+                          _selectedPlace == null
+                              ? 'Search address with Google Maps'
+                              : 'Update address from Google Maps',
                         ),
                       ),
                       const SizedBox(height: 12),
-                    ],
-                    TextFormField(
-                      controller: _nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Business name',
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (v) =>
-                          v == null || v.isEmpty ? 'Enter business name' : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _descriptionController,
-                      decoration: const InputDecoration(
-                        labelText: 'Description',
-                        border: OutlineInputBorder(),
-                      ),
-                      maxLines: 3,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _addressController,
-                      decoration: const InputDecoration(
-                        labelText: 'Street address',
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (v) => v == null || v.isEmpty
-                          ? 'Enter business address'
-                          : null,
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _cityController,
-                            decoration: const InputDecoration(
-                              labelText: 'City',
-                              border: OutlineInputBorder(),
-                            ),
-                            validator: (v) =>
-                                v == null || v.isEmpty ? 'Enter city' : null,
+                      if (_selectedPlace != null) ...[
+                        Card(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primaryContainer
+                              .withValues(alpha: 0.2),
+                          child: ListTile(
+                            leading: const Icon(Icons.place_outlined),
+                            title: Text(_selectedPlace!.name),
+                            subtitle: Text(_selectedPlace!.formattedAddress),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextFormField(
-                            controller: _stateController,
-                            decoration: const InputDecoration(
-                              labelText: 'State',
-                              border: OutlineInputBorder(),
-                            ),
-                            validator: (v) =>
-                                v == null || v.isEmpty ? 'Enter state' : null,
-                          ),
-                        ),
+                        const SizedBox(height: 12),
                       ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _postalController,
-                      decoration: const InputDecoration(
-                        labelText: 'Postal code',
-                        border: OutlineInputBorder(),
+                      TextFormField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Business name',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) => v == null || v.isEmpty
+                            ? 'Enter business name'
+                            : null,
                       ),
-                      validator: (v) =>
-                          v == null || v.isEmpty ? 'Enter postal code' : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _phoneController,
-                      decoration: const InputDecoration(
-                        labelText: 'Phone',
-                        border: OutlineInputBorder(),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _descriptionController,
+                        decoration: const InputDecoration(
+                          labelText: 'Description',
+                          border: OutlineInputBorder(),
+                        ),
+                        maxLines: 3,
                       ),
-                      keyboardType: TextInputType.phone,
-                    ),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _submitting ? null : _submit,
-                        icon: _submitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.add_business),
-                        label: Text(_submitting ? 'Adding…' : 'Add Business'),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _logoUrlController,
+                              decoration: const InputDecoration(
+                                labelText: 'Logo image',
+                                hintText: 'Paste URL or upload an image',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          BusinessLogoAvatar(
+                            name: _nameController.text.isEmpty
+                                ? 'Business'
+                                : _nameController.text,
+                            logoUrl: _logoUrlController.text.trim().isEmpty
+                                ? null
+                                : _logoUrlController.text.trim(),
+                            size: 56,
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _submitting ? null : _pickLogo,
+                            icon: const Icon(Icons.file_upload_outlined),
+                            label: const Text('Upload image'),
+                          ),
+                          if (_logoUrlController.text.trim().isNotEmpty)
+                            TextButton.icon(
+                              onPressed: _submitting
+                                  ? null
+                                  : () {
+                                      _logoUrlController.clear();
+                                    },
+                              icon: const Icon(Icons.clear),
+                              label: const Text('Clear'),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Paste an existing image link or upload a PNG, JPG, WEBP file. Uploaded images are converted to a data URL and saved with the business.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _addressController,
+                        decoration: const InputDecoration(
+                          labelText: 'Street address',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) => v == null || v.isEmpty
+                            ? 'Enter business address'
+                            : null,
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _cityController,
+                              decoration: const InputDecoration(
+                                labelText: 'City',
+                                border: OutlineInputBorder(),
+                              ),
+                              validator: (v) =>
+                                  v == null || v.isEmpty ? 'Enter city' : null,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _stateController,
+                              decoration: const InputDecoration(
+                                labelText: 'State',
+                                border: OutlineInputBorder(),
+                              ),
+                              validator: (v) =>
+                                  v == null || v.isEmpty ? 'Enter state' : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _postalController,
+                        decoration: const InputDecoration(
+                          labelText: 'Postal code',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) =>
+                            v == null || v.isEmpty ? 'Enter postal code' : null,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _phoneController,
+                        decoration: const InputDecoration(
+                          labelText: 'Phone',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              SafeArea(
+                top: false,
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _submitting ? null : _submit,
+                    icon: _submitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.add_business),
+                    label: Text(_submitting ? 'Adding…' : 'Add Business'),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -613,6 +797,14 @@ class _BusinessTile extends StatelessWidget {
           children: [
             Row(
               children: [
+                BusinessLogoAvatar(
+                  name: business.name,
+                  logoUrl: business.logoSquareUrl ??
+                      business.logoUrl ??
+                      business.logoOriginalUrl,
+                  size: 44,
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -633,6 +825,7 @@ class _BusinessTile extends StatelessWidget {
                       await context.read<AppState>().updateBusiness(
                             business.id,
                             isActive: value,
+                            logoUrl: business.logoUrl,
                           );
                     } catch (e) {
                       if (context.mounted) {

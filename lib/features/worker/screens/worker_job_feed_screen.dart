@@ -1,4 +1,4 @@
-// ignore_for_file: directives_ordering, require_trailing_commas
+// ignore_for_file: directives_ordering, require_trailing_commas, avoid_print
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
+import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 import 'package:talent/core/widgets/access_tag.dart';
 import 'package:talent/core/services/business_access_context.dart';
 import 'package:talent/core/providers/team_provider.dart';
@@ -33,9 +34,33 @@ class _WorkerJobFeedScreenState extends State<WorkerJobFeedScreen> {
     setState(() => _loading = true);
     final appState = context.read<AppState>();
     final workerId = appState.currentUser?.id ?? '';
-    if (workerId.isNotEmpty) {
-      await appState.loadWorkerJobs(workerId);
+
+    if (workerId.isEmpty) {
+      print('❌ Cannot load jobs: No worker ID available');
+      setState(() => _loading = false);
+      return;
     }
+
+    try {
+      print('🔍 Loading jobs for worker: $workerId');
+      await appState.loadWorkerJobs(workerId);
+      print('✅ Jobs loaded successfully');
+    } catch (error) {
+      print('❌ Failed to load jobs: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load jobs: ${error.toString()}'),
+            backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: _loadJobs,
+            ),
+          ),
+        );
+      }
+    }
+
     setState(() => _loading = false);
   }
 
@@ -136,23 +161,41 @@ class _WorkerJobFeedScreenState extends State<WorkerJobFeedScreen> {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
             sliver: filteredJobs.isEmpty
-                ? const SliverToBoxAdapter(
+                ? SliverToBoxAdapter(
                     child: Card(
                       child: Padding(
-                        padding: EdgeInsets.all(24),
+                        padding: const EdgeInsets.all(24),
                         child: Column(
                           children: [
-                            Icon(Icons.work_off_outlined, size: 48),
-                            SizedBox(height: 12),
-                            Text(
-                              'No matching jobs',
-                              style: TextStyle(fontWeight: FontWeight.bold),
+                            Icon(
+                              jobs.isEmpty
+                                  ? Icons.error_outline
+                                  : Icons.work_off_outlined,
+                              size: 48,
+                              color: jobs.isEmpty ? Colors.red : null,
                             ),
-                            SizedBox(height: 4),
+                            const SizedBox(height: 12),
                             Text(
-                              'Try adjusting your filters or check back later',
+                              jobs.isEmpty
+                                  ? 'Unable to load jobs'
+                                  : 'No matching jobs',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              jobs.isEmpty
+                                  ? 'Check your internet connection and login status. Pull down to retry.'
+                                  : 'Try adjusting your filters or check back later',
                               textAlign: TextAlign.center,
                             ),
+                            if (jobs.isEmpty) ...[
+                              const SizedBox(height: 16),
+                              ElevatedButton(
+                                onPressed: _loadJobs,
+                                child: const Text('Retry'),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -213,7 +256,18 @@ class JobCard extends StatelessWidget {
             children: [
               // Header row
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  BusinessLogoAvatar(
+                    logoUrl: job.businessLogoSquareUrl ??
+                        job.businessLogoUrl ??
+                        job.businessLogoOriginalUrl,
+                    name: job.businessName.isNotEmpty
+                        ? job.businessName
+                        : job.title,
+                    size: 40,
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -333,10 +387,102 @@ class JobCard extends StatelessWidget {
       );
     } catch (error) {
       if (!context.mounted) return;
-      scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text('Failed to apply: ${error.toString()}')),
-      );
+
+      // Check if it's a 402 payment required error
+      if (error.toString().contains('402') &&
+          error.toString().toLowerCase().contains('free application limit')) {
+        // Show premium upgrade dialog
+        _showPremiumUpgradeDialog(context, job);
+      } else {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(content: Text('Failed to apply: ${error.toString()}')),
+        );
+      }
     }
+  }
+
+  void _showPremiumUpgradeDialog(BuildContext context, JobPosting job) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Upgrade to Premium'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'You\'ve reached your free application limit!',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Upgrade to Premium to continue applying for jobs and unlock:',
+              ),
+              const SizedBox(height: 8),
+              const Text('• Unlimited job applications'),
+              const Text('• Priority support'),
+              const Text('• Advanced job filters'),
+              const Text('• Direct employer messaging'),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Job: ${job.title}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text('Company: ${job.businessName}'),
+                    Text('Rate: \$${job.hourlyRate.toStringAsFixed(2)}/hr'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Your application will be saved and automatically submitted once you upgrade.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Later'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _navigateToSubscriptionPage(context, job);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Upgrade Now'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _navigateToSubscriptionPage(BuildContext context, JobPosting job) {
+    // TODO: Navigate to subscription/premium upgrade page
+    // For now, show a placeholder
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content:
+            Text('Subscription page coming soon! Contact support for now.'),
+        duration: Duration(seconds: 3),
+      ),
+    );
   }
 }
 

@@ -112,6 +112,7 @@ class TeamProvider with ChangeNotifier {
 
   /// Update team member permissions
   Future<bool> updateAccess({
+    String? currentUserId,
     required String identifier,
     String? accessLevel,
     String? role,
@@ -138,13 +139,15 @@ class TeamProvider with ChangeNotifier {
       );
 
       if (response.success) {
-        // Update local list by reloading - simpler than trying to patch
-        // In production, you might want to parse the response data
-        final index =
-            _teamMembers.indexWhere((access) => access.id == identifier);
-        if (index != -1) {
-          // For now, just reload the team members to get the updated data
-          // In a more sophisticated implementation, you'd update the specific item
+        if (currentUserId != null && currentUserId.isNotEmpty) {
+          await loadTeamMembers(currentUserId);
+        } else {
+          final index =
+              _teamMembers.indexWhere((access) => access.id == identifier);
+          if (index != -1 && response.data is Map<String, dynamic>) {
+            _teamMembers[index] = TeamAccess.fromJson(
+                response.data as Map<String, dynamic>);
+          }
           notifyListeners();
         }
         return true;

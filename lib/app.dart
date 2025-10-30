@@ -1,9 +1,11 @@
+import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/providers/team_provider.dart';
 import 'package:talent/core/services/locator/service_locator.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/core/theme/app_theme.dart';
+import 'package:talent/core/widgets/message_notification_listener.dart';
 import 'package:talent/features/auth/auth_gate.dart';
 
 class WorkConnectApp extends StatelessWidget {
@@ -11,6 +13,7 @@ class WorkConnectApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    developer.log('🏗️ Building WorkConnectApp...', name: 'App');
     return FutureBuilder<ServiceLocator>(
       future: ServiceLocator.create(
         baseUrl: const String.fromEnvironment(
@@ -18,7 +21,17 @@ class WorkConnectApp extends StatelessWidget {
           defaultValue: 'https://dhruvbackend.vercel.app/api',
         ),
         enableLogging: true,
-      ),
+      ).then((locator) {
+        developer.log('✅ ServiceLocator initialized successfully',
+            name: 'ServiceLocator', error: null);
+        return locator;
+      }).catchError((error, stack) {
+        developer.log('❌ ServiceLocator initialization failed',
+            name: 'ServiceLocator',
+            error: error,
+            stackTrace: stack as StackTrace?);
+        throw error as Object;
+      }),
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const MaterialApp(
@@ -50,11 +63,13 @@ class WorkConnectApp extends StatelessWidget {
               create: (_) => TeamProvider(),
             ),
           ],
-          child: MaterialApp(
-            title: 'WorkConnect',
-            theme: WorkConnectTheme.light,
-            debugShowCheckedModeBanner: false,
-            home: const AuthGate(),
+          child: MessageNotificationListener(
+            child: MaterialApp(
+              title: 'WorkConnect',
+              theme: WorkConnectTheme.light,
+              debugShowCheckedModeBanner: false,
+              home: const AuthGate(),
+            ),
           ),
         );
       },

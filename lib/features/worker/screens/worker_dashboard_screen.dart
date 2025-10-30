@@ -6,6 +6,8 @@ import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
+import 'package:talent/features/worker/screens/worker_profile_screen_new.dart';
+import 'package:talent/features/worker/screens/worker_settings_screen.dart';
 
 class WorkerDashboardScreen extends StatelessWidget {
   const WorkerDashboardScreen({super.key});
@@ -26,6 +28,18 @@ class WorkerDashboardScreen extends StatelessWidget {
               icon: const Icon(Icons.refresh),
               onPressed: () => context.read<AppState>().refreshActiveRole(),
               tooltip: 'Refresh',
+            ),
+            IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const WorkerSettingsScreen(),
+                  ),
+                );
+              },
+              tooltip: 'Settings',
             ),
           ],
         ),
@@ -96,41 +110,68 @@ class WorkerDashboardScreen extends StatelessWidget {
 
           const SizedBox(height: 24),
 
-          // Metrics
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
+          // Metrics - 2 columns grid
+          Column(
             children: [
-              _MetricCard(
-                label: 'Available jobs',
-                value: metrics!.availableJobs.toString(),
-                icon: Icons.work_outline,
+              Row(
+                children: [
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Available jobs',
+                      value: metrics!.availableJobs.toString(),
+                      icon: Icons.work_outline,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Active applications',
+                      value: metrics.activeApplications.toString(),
+                      icon: Icons.assignment_outlined,
+                    ),
+                  ),
+                ],
               ),
-              _MetricCard(
-                label: 'Active applications',
-                value: metrics.activeApplications.toString(),
-                icon: Icons.assignment_outlined,
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Upcoming shifts',
+                      value: metrics.upcomingShifts.toString(),
+                      icon: Icons.schedule,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Hours completed',
+                      value: metrics.completedHours.toStringAsFixed(0),
+                      icon: Icons.timer,
+                    ),
+                  ),
+                ],
               ),
-              _MetricCard(
-                label: 'Upcoming shifts',
-                value: metrics.upcomingShifts.toString(),
-                icon: Icons.schedule,
-              ),
-              _MetricCard(
-                label: 'Hours completed',
-                value: metrics.completedHours.toStringAsFixed(0),
-                icon: Icons.timer,
-              ),
-              _MetricCard(
-                label: 'Earnings this week',
-                value: currency.format(metrics.earningsThisWeek),
-                icon: Icons.payments_outlined,
-              ),
-              _MetricCard(
-                label: 'Free applications left',
-                value: metrics.freeApplicationsRemaining.toString(),
-                icon: Icons.workspace_premium_outlined,
-                highlight: metrics.freeApplicationsRemaining == 0,
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Earnings this week',
+                      value: currency.format(metrics.earningsThisWeek),
+                      icon: Icons.payments_outlined,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Free applications left',
+                      value: metrics.freeApplicationsRemaining.toString(),
+                      icon: Icons.workspace_premium_outlined,
+                      highlight: metrics.freeApplicationsRemaining == 0,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -151,8 +192,11 @@ class WorkerDashboardScreen extends StatelessWidget {
             icon: Icons.person_outline,
             buttonLabel: 'Update profile',
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Profile editing coming soon.')),
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const WorkerProfileScreen(),
+                ),
               );
             },
           ),
@@ -213,26 +257,22 @@ class _MetricCard extends StatelessWidget {
     final foreground =
         highlight ? theme.colorScheme.error : theme.colorScheme.primary;
 
-    return SizedBox(
-      width: 168,
-      child: Card(
-        color: background,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, color: foreground),
-              const SizedBox(height: 12),
-              Text(
-                value,
-                style:
-                    theme.textTheme.headlineSmall?.copyWith(color: foreground),
-              ),
-              const SizedBox(height: 4),
-              Text(label, style: theme.textTheme.bodyMedium),
-            ],
-          ),
+    return Card(
+      color: background,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: foreground),
+            const SizedBox(height: 12),
+            Text(
+              value,
+              style: theme.textTheme.headlineSmall?.copyWith(color: foreground),
+            ),
+            const SizedBox(height: 4),
+            Text(label, style: theme.textTheme.bodyMedium),
+          ],
         ),
       ),
     );

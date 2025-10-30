@@ -106,11 +106,14 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     String employerId, {
     String? businessId,
   }) async {
-    // Auto-extract business_id from current user if not provided
-    final resolvedBusinessId = businessId ?? _currentUserBusinessId;
+    final trimmedBusinessId = businessId?.trim();
+    final resolvedBusinessId =
+        (trimmedBusinessId != null && trimmedBusinessId.isNotEmpty)
+            ? trimmedBusinessId
+            : null;
 
     final query = <String, dynamic>{'employerId': employerId};
-    if (resolvedBusinessId != null && resolvedBusinessId.isNotEmpty) {
+    if (resolvedBusinessId != null) {
       query['businessId'] = resolvedBusinessId;
     }
 
@@ -148,6 +151,11 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     if (value is Map<String, dynamic>) {
       return value;
     }
+    if (value is Map) {
+      return Map<String, dynamic>.from(
+        value.map((key, val) => MapEntry(key.toString(), val)),
+      );
+    }
     return null;
   }
 
@@ -162,6 +170,28 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
   List<String>? _stringList(dynamic value) {
     if (value is List) {
       return value.map((item) => item.toString()).toList();
+    }
+    return null;
+  }
+
+  String? _composeName(Map<String, dynamic>? data) {
+    if (data == null) return null;
+    final first = _string(data['firstName']) ?? _string(data['givenName']);
+    final last = _string(data['lastName']) ?? _string(data['familyName']);
+    final parts = <String>[];
+    if (first != null && first.isNotEmpty) {
+      parts.add(first);
+    }
+    if (last != null && last.isNotEmpty) {
+      parts.add(last);
+    }
+    final combined = parts.join(' ').trim();
+    if (combined.isNotEmpty) {
+      return combined;
+    }
+    final fallback = _string(data['name']);
+    if (fallback != null && fallback.isNotEmpty) {
+      return fallback;
     }
     return null;
   }
@@ -194,13 +224,44 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
 
   JobPosting _parseJobPosting(dynamic value) {
     final json = _mapOrNull(value) ?? const <String, dynamic>{};
+    final employerDetails =
+        _mapOrNull(json['employerDetails']) ?? _mapOrNull(json['employer']);
+    final businessDetails =
+        _mapOrNull(json['businessDetails']) ?? _mapOrNull(json['business']);
+    final createdByDetails = _mapOrNull(json['createdByDetails']) ??
+        (json['createdBy'] is Map ? _mapOrNull(json['createdBy']) : null);
+
     final id = _string(json['id']) ?? _string(json['_id']) ?? '';
     final title = _string(json['title']) ?? 'Job';
     final description = _string(json['description']) ?? '';
-    final employerId =
-        _string(json['employerId']) ?? _string(json['employer']) ?? '';
-    final businessId =
-        _string(json['businessId']) ?? _string(json['business']) ?? '';
+
+    final employerId = _string(json['employerId']) ??
+        _string(employerDetails?['_id']) ??
+        _string(employerDetails?['id']) ??
+        _string(json['employer']) ??
+        '';
+    final employerEmail =
+        _string(employerDetails?['email']) ?? _string(json['employerEmail']);
+    final employerName = _composeName(employerDetails);
+
+    final businessId = _string(json['businessId']) ??
+        _string(businessDetails?['_id']) ??
+        _string(businessDetails?['id']) ??
+        _string(json['business']) ??
+        '';
+    final businessName = _string(json['businessName']) ??
+        _string(businessDetails?['businessName']) ??
+        _string(businessDetails?['name']) ??
+        '';
+
+    final createdById = _string(json['createdById']) ??
+        _string(createdByDetails?['_id']) ??
+        _string(createdByDetails?['id']);
+    final createdByEmail =
+        _string(createdByDetails?['email']) ?? _string(json['createdByEmail']);
+    final createdByName = _composeName(createdByDetails);
+    final createdByTag = _string(json['createdByTag']);
+
     final hourlyRate = double.tryParse(_string(json['hourlyRate']) ?? '') ?? 0;
     final overtimeRate = double.tryParse(_string(json['overtimeRate']) ?? '') ??
         (hourlyRate * 1.5);
@@ -208,19 +269,26 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     final tags = _stringList(json['tags']) ?? <String>[];
     final workDays = _stringList(json['workDays']) ?? <String>[];
     final isVerificationRequired =
-        _string(json['verificationRequired'])?.toLowerCase() == 'true';
-    final scheduleStart =
-        DateTime.tryParse(_string(json['startDate']) ?? '') ?? DateTime.now();
-    final scheduleEnd = DateTime.tryParse(_string(json['endDate']) ?? '') ??
+        _string(json['verificationRequired'])?.toLowerCase() == 'true' ||
+            json['verificationRequired'] == true;
+    final scheduleStart = DateTime.tryParse(_string(json['startDate']) ??
+            _string(json['scheduleStart']) ??
+            '') ??
+        DateTime.now();
+    final scheduleEnd = DateTime.tryParse(
+            _string(json['endDate']) ?? _string(json['scheduleEnd']) ?? '') ??
         scheduleStart.add(const Duration(hours: 4));
     final status = _parseJobStatus(_string(json['status']));
-    final postedAt =
-        DateTime.tryParse(_string(json['createdAt']) ?? '') ?? DateTime.now();
+    final postedAt = DateTime.tryParse(
+            _string(json['createdAt']) ?? _string(json['postedAt']) ?? '') ??
+        DateTime.now();
     final distanceMiles =
         double.tryParse(_string(json['distanceMiles']) ?? '') ?? 0;
-    final hasApplied = _string(json['hasApplied'])?.toLowerCase() == 'true';
+    final hasApplied = _string(json['hasApplied'])?.toLowerCase() == 'true' ||
+        json['hasApplied'] == true;
     final premiumRequired =
-        _string(json['premiumRequired'])?.toLowerCase() == 'true';
+        _string(json['premiumRequired'])?.toLowerCase() == 'true' ||
+            json['premiumRequired'] == true;
     final locationSummary = _string(json['locationSummary']);
     final applicantsCount =
         int.tryParse(_string(json['applicantsCount']) ?? '') ?? 0;
@@ -247,6 +315,13 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
       premiumRequired: premiumRequired,
       locationSummary: locationSummary,
       applicantsCount: applicantsCount,
+      businessName: businessName,
+      employerEmail: employerEmail,
+      employerName: employerName,
+      createdById: createdById,
+      createdByTag: createdByTag,
+      createdByEmail: createdByEmail,
+      createdByName: createdByName,
     );
   }
 
@@ -267,42 +342,7 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
 
   BusinessLocation _parseBusinessLocation(dynamic value) {
     final json = _mapOrNull(value) ?? const <String, dynamic>{};
-    final id = _string(json['id']) ?? _string(json['_id']) ?? '';
-    final name = _string(json['name']) ?? 'Business';
-    final address = _string(json['address']) ??
-        _string(json['street']) ??
-        _string(_mapOrNull(json['address'])?['street']) ??
-        '';
-    final city = _string(json['city']) ??
-        _string(_mapOrNull(json['address'])?['city']) ??
-        '';
-    final state = _string(json['state']) ??
-        _string(_mapOrNull(json['address'])?['state']) ??
-        '';
-    final postalCode = _string(json['postalCode']) ??
-        _string(_mapOrNull(json['address'])?['postalCode']) ??
-        '';
-    final phone = _string(json['contactPhone']) ?? '';
-    final type = _string(json['type']) ?? 'Location';
-    final isActive = _string(json['isActive'])?.toLowerCase() == 'true';
-    final jobCount = int.tryParse(_string(json['jobCount']) ?? '') ?? 0;
-    final hireCount = int.tryParse(_string(json['hireCount']) ?? '') ?? 0;
-    final description = _string(json['description']) ?? '';
-
-    return BusinessLocation(
-      id: id.isEmpty ? name : id,
-      name: name,
-      address: address,
-      city: city,
-      state: state,
-      postalCode: postalCode,
-      phone: phone,
-      type: type,
-      isActive: isActive,
-      jobCount: jobCount,
-      hireCount: hireCount,
-      description: description,
-    );
+    return BusinessLocation.fromJson(json);
   }
 
   EmployerDashboardMetrics _parseEmployerMetrics(Map<String, dynamic> json) {
@@ -396,7 +436,13 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     List<dynamic> extractApplications(dynamic source) {
       if (source is List) return source;
       if (source is Map<String, dynamic>) {
-        for (final key in ['data', 'applications', 'items', 'results', 'records']) {
+        for (final key in [
+          'data',
+          'applications',
+          'items',
+          'results',
+          'records'
+        ]) {
           final value = source[key];
           if (value is List) return value;
           if (value is Map<String, dynamic>) {
@@ -430,7 +476,7 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
   }) async {
     // Auto-extract business_id from current user if not provided
     final resolvedBusinessId = _resolveBusinessId(businessId);
-    
+
     final body = {
       'status': status.toString().split('.').last,
       if (resolvedBusinessId != null) 'businessId': resolvedBusinessId,
@@ -477,7 +523,7 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
       {DateTime? startDate, String? businessId}) async {
     // Auto-extract business_id from current user if not provided
     final resolvedBusinessId = _resolveBusinessId(businessId);
-    
+
     // Include startDate in the request body (defaulting to today)
     final body = {
       'startDate': (startDate ?? DateTime.now()).toIso8601String(),
@@ -657,7 +703,7 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     return Application(
       id: id,
       jobId: jobId,
-      workerId: json['worker']?.toString() ?? '',
+      workerId: _extractId(json['worker']),
       workerName: workerName,
       workerExperience: workerExperience,
       workerSkills: workerSkills,
@@ -670,13 +716,13 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
 
   // Helper method to parse attendance data from API response
   AttendanceRecord _parseAttendanceFromApi(Map<String, dynamic> json) {
-    final id = json['id']?.toString() ?? json['_id']?.toString() ?? '';
+    final id = _extractId(json['id'] ?? json['_id']);
 
     return AttendanceRecord(
       id: id,
-      workerId: json['worker']?.toString() ?? '',
-      jobId: json['job']?.toString() ?? '',
-      businessId: json['business']?.toString() ?? '',
+      workerId: _extractId(json['worker']),
+      jobId: _extractId(json['job']),
+      businessId: _extractId(json['business']),
       scheduledStart:
           DateTime.tryParse(json['scheduledStart']?.toString() ?? '') ??
               DateTime.now(),
@@ -697,6 +743,49 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
       locationSummary: json['locationSnapshot']?.toString(),
       hourlyRate: double.tryParse(json['hourlyRate']?.toString() ?? ''),
     );
+  }
+
+  String _extractId(dynamic value) {
+    if (value == null) {
+      return '';
+    }
+
+    if (value is String) {
+      final match = RegExp(r'[0-9a-fA-F]{24}').firstMatch(value);
+      return match?.group(0) ?? value;
+    }
+
+    if (value is Map<String, dynamic>) {
+      for (final key in const [
+        '_id',
+        'id',
+        'user',
+        'userId',
+        'worker',
+        'workerId',
+        'job',
+        'jobId',
+        'business',
+        'businessId',
+        r'$oid',
+      ]) {
+        if (value.containsKey(key)) {
+          final candidate = _extractId(value[key]);
+          if (candidate.isNotEmpty) {
+            return candidate;
+          }
+        }
+      }
+    } else if (value is Map) {
+      for (final entry in value.entries) {
+        final candidate = _extractId(entry.value);
+        if (candidate.isNotEmpty) {
+          return candidate;
+        }
+      }
+    }
+
+    return value.toString();
   }
 
   // Helper method to parse application status
@@ -757,5 +846,81 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     final json = decodeJson(response);
     final data = (json['data'] as Map<String, dynamic>?) ?? json;
     return EmploymentRecord.fromJson(data);
+  }
+
+  @override
+  Future<List<JobPaymentRecord>> fetchJobPaymentHistory({
+    int? page,
+    int? limit,
+  }) async {
+    final query = <String, String>{};
+    if (page != null && page > 0) {
+      query['page'] = page.toString();
+    }
+    if (limit != null && limit > 0) {
+      query['limit'] = limit.toString();
+    }
+
+    final response = await client.get(
+      resolveWithQuery(
+        'api/payments/job-posting',
+        query: query.isEmpty ? null : query,
+      ),
+      headers: headers(authToken: _authToken),
+    );
+
+    final decoded = decodeJson(response);
+    final List<dynamic> items;
+    if (decoded['data'] is List) {
+      items = decoded['data'] as List<dynamic>;
+    } else if (decoded['payments'] is List) {
+      items = decoded['payments'] as List<dynamic>;
+    } else {
+      items = const [];
+    }
+
+    return items
+        .whereType<Map>()
+        .map((entry) =>
+            JobPaymentRecord.fromJson(Map<String, dynamic>.from(entry)))
+        .toList();
+  }
+
+  @override
+  Future<List<EmployerFeedback>> fetchEmployerFeedback({
+    int? page,
+    int? limit,
+  }) async {
+    final query = <String, String>{};
+    if (page != null && page > 0) {
+      query['page'] = page.toString();
+    }
+    if (limit != null && limit > 0) {
+      query['limit'] = limit.toString();
+    }
+
+    final response = await client.get(
+      resolveWithQuery(
+        'api/feedback/employer',
+        query: query.isEmpty ? null : query,
+      ),
+      headers: headers(authToken: _authToken),
+    );
+
+    final decoded = decodeJson(response);
+    final List<dynamic> items;
+    if (decoded['data'] is List) {
+      items = decoded['data'] as List<dynamic>;
+    } else if (decoded['feedback'] is List) {
+      items = decoded['feedback'] as List<dynamic>;
+    } else {
+      items = const [];
+    }
+
+    return items
+        .whereType<Map>()
+        .map((entry) =>
+            EmployerFeedback.fromJson(Map<String, dynamic>.from(entry)))
+        .toList();
   }
 }

@@ -2,12 +2,22 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:talent/core/config/environment_config.dart';
+import 'package:talent/core/config/payment_config.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/services/business_access_context.dart';
+import 'package:talent/core/services/location_service.dart';
 import 'package:talent/core/services/locator/service_locator.dart';
 import 'package:talent/core/services/user_permissions_service.dart';
+import 'package:talent/core/services/push_notification_service.dart';
+
+part 'payment_extensions.dart';
 
 class AppState extends ChangeNotifier {
   AppState(this._service);
@@ -58,6 +68,81 @@ class AppState extends ChangeNotifier {
   List<AppNotification> _notifications = [];
   List<Conversation> _conversations = [];
   final List<Application> _selectedJobApplications = [];
+  List<JobPaymentRecord> _jobPayments = [];
+  bool _isLoadingJobPayments = false;
+  List<EmployerFeedback> _employerFeedback = [];
+  bool _isLoadingEmployerFeedback = false;
+  List<EmploymentRecord> _workerEmploymentHistory = [];
+  bool _isLoadingEmploymentHistory = false;
+  List<EmployerFeedback> _workerFeedback = [];
+  bool _isLoadingWorkerFeedback = false;
+  late Razorpay _razorpay;
+  Completer<void>? _paymentCompleter;
+  _PendingJobPayment? _pendingJobPayment;
+
+  // ================== Worker Preferences Methods ==================
+  Future<void> updateWorkerPreferences({
+    double? minimumPay,
+    double? maxTravelDistance,
+    bool? availableForFullTime,
+    bool? availableForPartTime,
+    bool? availableForTemporary,
+    String? weekAvailability,
+    required List<Map<String, dynamic>> availability,
+  }) async {
+    _setBusy(true);
+    try {
+      final updatedProfile = await _service.workerPreferences.updatePreferences(
+        minimumPay: minimumPay,
+        maxTravelDistance: maxTravelDistance,
+        availableForFullTime: availableForFullTime,
+        availableForPartTime: availableForPartTime,
+        availableForTemporary: availableForTemporary,
+        weekAvailability: weekAvailability,
+      );
+      _workerProfile = updatedProfile as WorkerProfile?;
+      notifyListeners();
+    } finally {
+      _setBusy(false);
+    }
+  }
+
+  Future<void> updatePrivacySettings({
+    bool? isVisible,
+    bool? locationEnabled,
+    bool? shareWorkHistory,
+  }) async {
+    _setBusy(true);
+    try {
+      final updatedProfile =
+          await _service.workerPreferences.updatePrivacySettings(
+        isVisible: isVisible,
+        locationEnabled: locationEnabled,
+        shareWorkHistory: shareWorkHistory,
+      );
+      _workerProfile = updatedProfile as WorkerProfile?;
+      notifyListeners();
+    } finally {
+      _setBusy(false);
+    }
+  }
+
+  Future<void> deleteAccount() async {
+    _setBusy(true);
+    try {
+      await _service.workerPreferences.deleteAccount();
+
+      // Clear all local data
+      _currentUser = null;
+      _activeRole = null;
+      _workerProfile = null;
+      _employerProfile = null;
+      await _service.auth.logout();
+      notifyListeners();
+    } finally {
+      _setBusy(false);
+    }
+  }
 
   // ================== Getters ==================
   bool get isBusy => _isBusy;
@@ -93,8 +178,25 @@ class AppState extends ChangeNotifier {
   List<String> get currentUserPermissions =>
       List.unmodifiable(_currentUserPermissions);
   bool get isLoadingCurrentUserTeamMember => _isLoadingCurrentUserTeamMember;
+  List<JobPaymentRecord> get jobPayments => List.unmodifiable(_jobPayments);
+  bool get isLoadingJobPayments => _isLoadingJobPayments;
+  List<EmployerFeedback> get employerFeedback =>
+      List.unmodifiable(_employerFeedback);
+  bool get isLoadingEmployerFeedback => _isLoadingEmployerFeedback;
+  List<EmploymentRecord> get workerEmploymentHistory =>
+      List.unmodifiable(_workerEmploymentHistory);
+  bool get isLoadingEmploymentHistory => _isLoadingEmploymentHistory;
+  List<EmployerFeedback> get workerFeedback =>
+      List.unmodifiable(_workerFeedback);
+  bool get isLoadingWorkerFeedback => _isLoadingWorkerFeedback;
 
   List<String> getCurrentUserPermissions() => currentUserPermissions;
+
+  String? _extractObjectId(String? value) {
+    if (value == null) return null;
+    final match = RegExp(r'[0-9a-fA-F]{24}').firstMatch(value);
+    return match?.group(0);
+  }
 
   BusinessAccessInfo? ownershipAccessInfo(String? businessId) {
     final user = _currentUser;
@@ -125,6 +227,113 @@ class AppState extends ChangeNotifier {
     }
 
     return null;
+  }
+
+  BusinessAccessInfo? jobAccessInfo(JobPosting job) {
+    final directLabel = _resolveJobOwnerLabel(job);
+    if (directLabel != null) {
+      final email = directLabel.toLowerCase() == 'owner'
+          ? (_currentUser?.email ?? '')
+          : job.createdByEmail?.isNotEmpty == true
+              ? job.createdByEmail!
+              : job.employerEmail?.isNotEmpty == true
+                  ? job.employerEmail!
+                  : (_currentUser?.email ?? '');
+      return BusinessAccessInfo(
+        ownerName: directLabel,
+        ownerEmail: email,
+        businessName: null,
+      );
+    }
+
+    final fallback = ownershipAccessInfo(job.businessId);
+    if (fallback == null) {
+      return null;
+    }
+
+    final normalizedLabel =
+        _normalizeOwnerLabel(fallback.ownerName, fallback.ownerEmail);
+    final normalizedEmail = fallback.ownerEmail.trim().contains('@')
+        ? fallback.ownerEmail.trim()
+        : (_currentUser?.email ?? fallback.ownerEmail);
+
+    return BusinessAccessInfo(
+      ownerName: normalizedLabel,
+      ownerEmail: normalizedEmail,
+      businessName: fallback.businessName,
+    );
+  }
+
+  String? _resolveJobOwnerLabel(JobPosting job) {
+    final currentEmail = _currentUser?.email.trim();
+    if (currentEmail == null || currentEmail.isEmpty) {
+      return null;
+    }
+
+    final tagCandidates = <String?>[
+      job.createdByTag?.trim(),
+      job.createdByName?.trim(),
+    ];
+
+    for (final candidate in tagCandidates) {
+      if (candidate == null || candidate.isEmpty) {
+        continue;
+      }
+      if (candidate.toLowerCase() == 'owner') {
+        return 'Owner';
+      }
+      if (candidate.contains('@')) {
+        return candidate;
+      }
+    }
+
+    final emailCandidates = <String?>[
+      job.createdByEmail?.trim(),
+      job.employerEmail?.trim(),
+    ];
+
+    for (final email in emailCandidates) {
+      if (email == null || email.isEmpty) {
+        continue;
+      }
+      if (email.toLowerCase() == currentEmail.toLowerCase()) {
+        return 'Owner';
+      }
+      if (email.contains('@')) {
+        return email;
+      }
+    }
+
+    return null;
+  }
+
+  String _normalizeOwnerLabel(String label, String email) {
+    final trimmedLabel = label.trim();
+    final trimmedEmail = email.trim();
+    if (trimmedLabel.isEmpty || trimmedLabel.toLowerCase() == 'owner') {
+      return 'Owner';
+    }
+    if (trimmedLabel.contains('@')) {
+      return trimmedLabel;
+    }
+    if (trimmedEmail.contains('@')) {
+      return trimmedEmail;
+    }
+    return trimmedLabel;
+  }
+
+  Future<WorkerProfile?> fetchWorkerProfileSnapshot(String workerId) async {
+    final normalized = _extractObjectId(workerId);
+    if (normalized == null || normalized.isEmpty) {
+      return null;
+    }
+    try {
+      return await _service.worker.fetchWorkerProfile(normalized);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to load worker profile for $normalized: $error');
+      debugPrint(stackTrace.toString());
+      return null;
+    }
   }
 
   // Attendance management getters
@@ -162,6 +371,7 @@ class AppState extends ChangeNotifier {
           lastName: _currentUser!.lastName,
           email: _currentUser!.email,
           phone: '',
+          emailNotificationsEnabled: true,
           skills: const [],
           experience: '',
           bio: 'Loading profile data...',
@@ -190,6 +400,9 @@ class AppState extends ChangeNotifier {
 
       // Refresh data immediately after login
       await refreshActiveRole();
+
+      // Initialize push notifications after successful login
+      await _initializePushNotifications();
     } finally {
       _setBusy(false);
     }
@@ -233,10 +446,33 @@ class AppState extends ChangeNotifier {
     }
 
     try {
-      _notifications = await _service.messaging.fetchNotifications(
+      final newNotifications = await _service.messaging.fetchNotifications(
         user.id,
         businessId: businessId,
       );
+
+      // Check for new message notifications
+      final messageNotifications = newNotifications
+          .where((n) =>
+              n.type == NotificationType.message &&
+              !_notifications.any((existing) => existing.id == n.id))
+          .toList();
+
+      // Trigger pop-up for new message notifications
+      for (final messageNotification in messageNotifications) {
+        _showMessageNotificationPopup({
+          'title': messageNotification.title,
+          'body': messageNotification.message,
+          'type': 'message',
+          'notificationType': 'message',
+          'showPopup': true,
+          'senderName': messageNotification.data['senderName'],
+          'conversationId': messageNotification.data['conversationId'],
+          'messageId': messageNotification.data['messageId'],
+        });
+      }
+
+      _notifications = newNotifications;
     } catch (error) {
       print('Error loading notifications: $error');
     }
@@ -342,6 +578,98 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  // ================== Push Notifications ==================
+  Future<void> _initializePushNotifications() async {
+    try {
+      await PushNotificationService.instance.initialize(
+        baseUrl: _service.apiUrl,
+        authToken: _service.auth.authToken,
+      );
+
+      // Set up notification callbacks
+      PushNotificationService.instance.onNotificationReceived =
+          _handleNotificationReceived;
+      PushNotificationService.instance.onNotificationTap =
+          _handleNotificationTap;
+
+      print('✅ Push notifications initialized successfully');
+    } catch (e) {
+      print('❌ Failed to initialize push notifications: $e');
+    }
+  }
+
+  void _handleNotificationReceived(Map<String, dynamic> data) {
+    print('📨 Notification received: $data');
+
+    // Refresh notifications to show the new one
+    loadNotifications();
+
+    // Handle message notifications specifically with pop-ups
+    final type = data['type'] as String? ?? data['notificationType'] as String?;
+    if (type == 'message' && data['showPopup'] == true) {
+      _showMessageNotificationPopup(data);
+    }
+
+    // Show a brief indication that a notification was received
+    notifyListeners();
+  }
+
+  void _showMessageNotificationPopup(Map<String, dynamic> data) {
+    final title = data['title'] as String? ?? 'New Message';
+    final body = data['body'] as String? ?? '';
+    final senderName = data['senderName'] as String? ?? 'Someone';
+
+    // Store the notification for showing when context is available
+    _pendingMessageNotification = {
+      'title': title,
+      'body': body,
+      'senderName': senderName,
+      'conversationId': data['conversationId'],
+      'messageId': data['messageId'],
+    };
+
+    notifyListeners(); // This will trigger UI updates that can show the popup
+  }
+
+  Map<String, dynamic>? _pendingMessageNotification;
+  Map<String, dynamic>? get pendingMessageNotification =>
+      _pendingMessageNotification;
+
+  void clearPendingMessageNotification() {
+    _pendingMessageNotification = null;
+    notifyListeners();
+  }
+
+  void _handleNotificationTap(Map<String, dynamic> data) {
+    print('👆 Notification tapped: $data');
+
+    // Handle different notification types
+    final type = data['type'] as String?;
+    switch (type) {
+      case 'attendance':
+        // Navigate to attendance screen
+        break;
+      case 'team_invite':
+      case 'team_update':
+        // Navigate to team management screen
+        break;
+      case 'application':
+        // Navigate to applications screen
+        break;
+      default:
+        // Navigate to notifications screen
+        break;
+    }
+  }
+
+  Future<void> sendTestNotification() async {
+    try {
+      await PushNotificationService.instance.showTestNotification();
+    } catch (e) {
+      print('❌ Failed to send test notification: $e');
+    }
+  }
+
   Future<void> switchRole(UserType newRole) async {
     if (_currentUser == null || newRole == _activeRole) return;
     _activeRole = newRole;
@@ -410,6 +738,13 @@ class AppState extends ChangeNotifier {
             _workerApplications = []; // Fallback to empty list
           }
 
+          // Fetch attendance records for worker dashboard
+          try {
+            await loadWorkerAttendanceRecords();
+          } catch (error) {
+            debugPrint('❌ Error loading worker attendance records: $error');
+          }
+
           // _workerShifts = await fetchWorkerShifts(_currentUser!.id);
 
           // For demo purposes, simulate some data:
@@ -419,6 +754,7 @@ class AppState extends ChangeNotifier {
             lastName: _currentUser!.lastName,
             email: _currentUser!.email,
             phone: '',
+            emailNotificationsEnabled: true,
             skills: const ['Customer Service', 'Food Service'],
             experience: '2 years',
             bio: 'Experienced worker ready for new opportunities',
@@ -445,15 +781,39 @@ class AppState extends ChangeNotifier {
 
           // Load actual jobs from API with fallback to mock data
           try {
+            print(
+                '🔍 Attempting to load worker jobs for user: ${_currentUser!.id}');
             _workerJobs =
                 await _service.worker.fetchWorkerJobs(_currentUser!.id);
             print(
-                'Loaded ${_workerJobs.length} worker jobs in refreshActiveRole');
+                '✅ Loaded ${_workerJobs.length} worker jobs in refreshActiveRole');
           } catch (e) {
-            print('Error loading worker jobs in refreshActiveRole: $e');
+            print('❌ Error loading worker jobs in refreshActiveRole: $e');
+
+            // Log specific error types for debugging
+            if (e.toString().contains('401') ||
+                e.toString().contains('Authentication')) {
+              print('❌ Authentication error - user may need to re-login');
+            } else if (e.toString().contains('404')) {
+              print('❌ Jobs endpoint not found - API may be down');
+            } else if (e.toString().contains('timeout')) {
+              print('❌ Request timeout - network issues');
+            }
+
             // Keep empty list if API call fails (fallback is handled in the service)
             _workerJobs = [];
           }
+
+          try {
+            _workerMetrics =
+                await _service.worker.fetchWorkerDashboardMetrics('me');
+          } catch (error, stackTrace) {
+            debugPrint('Error fetching worker dashboard metrics: $error');
+            debugPrint(stackTrace.toString());
+          }
+
+          await loadWorkerEmploymentHistory(forceRefresh: true);
+          await loadWorkerFeedback(forceRefresh: true);
         } catch (e) {
           print('Error fetching worker data: $e');
           // We already have placeholder data from login, so we can continue
@@ -549,6 +909,8 @@ class AppState extends ChangeNotifier {
             // Keep using placeholder data if the API call fails
           }
 
+          await loadEmployerFeedback(forceRefresh: true);
+
           await loadCurrentUserTeamMemberInfo(forceRefresh: true);
         } catch (e) {
           print('Error fetching employer data: $e');
@@ -571,12 +933,45 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Start periodic notification refresh every 60 seconds
+  Future<void> loadWorkerAttendanceRecords({String? workerId}) async {
+    final resolvedId =
+        _extractObjectId(workerId ?? _currentUser?.id) ?? (workerId ?? 'me');
+    if (resolvedId.isEmpty) {
+      debugPrint('⚠️ loadWorkerAttendanceRecords skipped: no worker id');
+      return;
+    }
+
+    try {
+      final records = await _service.worker.fetchWorkerAttendance(resolvedId);
+      _workerAttendance = records;
+      notifyListeners();
+    } catch (error, stackTrace) {
+      debugPrint('Error loading worker attendance records: $error');
+      debugPrint(stackTrace.toString());
+    }
+  }
+
+  void _upsertWorkerAttendanceRecord(AttendanceRecord record) {
+    final index = _workerAttendance.indexWhere((item) => item.id == record.id);
+    if (index >= 0) {
+      _workerAttendance[index] = record;
+    } else {
+      _workerAttendance = [..._workerAttendance, record];
+    }
+    notifyListeners();
+  }
+
+  /// Start periodic notification refresh - more frequent for workers
   void _startNotificationRefresh() {
     _stopNotificationRefresh(); // Stop any existing timer
 
+    // More frequent refresh for workers who need immediate hire notifications
+    final refreshInterval = _currentUser?.type == UserType.worker
+        ? const Duration(seconds: 30) // 30 seconds for workers
+        : const Duration(seconds: 60); // 60 seconds for employers
+
     _notificationRefreshTimer = Timer.periodic(
-      const Duration(seconds: 60),
+      refreshInterval,
       (timer) {
         if (_currentUser != null) {
           loadNotifications();
@@ -585,6 +980,20 @@ class AppState extends ChangeNotifier {
         }
       },
     );
+
+    print(
+        '📱 Started notification refresh every ${refreshInterval.inSeconds}s for ${_currentUser?.type}');
+  }
+
+  /// Force immediate notification refresh for all connected clients
+  Future<void> _forceNotificationRefresh() async {
+    try {
+      print('🔄 Forcing immediate notification refresh...');
+      await loadNotifications();
+      print('✅ Notification refresh completed');
+    } catch (error) {
+      print('❌ Error during forced notification refresh: $error');
+    }
   }
 
   /// Stop notification refresh timer
@@ -596,6 +1005,8 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _stopNotificationRefresh();
+    _razorpay.clear();
+    _clearPendingPayment();
     super.dispose();
   }
 
@@ -696,6 +1107,14 @@ class AppState extends ChangeNotifier {
     String? email,
     String? website,
     String? logoUrl,
+    // Google Places API location data
+    double? latitude,
+    double? longitude,
+    String? placeId,
+    String? formattedAddress,
+    double? allowedRadius,
+    String? locationName,
+    String? locationNotes,
   }) async {
     _setBusy(true);
     try {
@@ -707,6 +1126,15 @@ class AppState extends ChangeNotifier {
         state: state,
         postalCode: postalCode,
         phone: phone,
+        logoUrl: logoUrl,
+        // Pass Google Places API location data
+        latitude: latitude,
+        longitude: longitude,
+        placeId: placeId,
+        formattedAddress: formattedAddress,
+        allowedRadius: allowedRadius,
+        locationName: locationName,
+        locationNotes: locationNotes,
       );
 
       _businesses = [..._businesses, business];
@@ -726,6 +1154,8 @@ class AppState extends ChangeNotifier {
     String? postalCode,
     String? phone,
     bool? isActive,
+    String? logoUrl,
+    double? allowedRadius,
   }) async {
     _setBusy(true);
     try {
@@ -739,6 +1169,8 @@ class AppState extends ChangeNotifier {
         postalCode: postalCode,
         phone: phone,
         isActive: isActive,
+        logoUrl: logoUrl,
+        allowedRadius: allowedRadius,
       );
 
       // update local cache
@@ -755,6 +1187,15 @@ class AppState extends ChangeNotifier {
           postalCode: postalCode ?? current.postalCode,
           phone: phone ?? current.phone,
           isActive: isActive ?? current.isActive,
+          logoUrl: logoUrl ?? current.logoUrl,
+          type: current.type,
+          jobCount: current.jobCount,
+          hireCount: current.hireCount,
+          latitude: current.latitude,
+          longitude: current.longitude,
+          allowedRadius: allowedRadius ?? current.allowedRadius,
+          timezone: current.timezone,
+          notes: current.notes,
         );
         _businesses[index] = updated;
       }
@@ -829,10 +1270,179 @@ class AppState extends ChangeNotifier {
       );
 
       _employerJobs = [..._employerJobs, job];
+
+      if (_currentUser != null &&
+          !_currentUser!.isPremium &&
+          !job.premiumRequired) {
+        final updatedUser = User(
+          id: _currentUser!.id,
+          firstName: _currentUser!.firstName,
+          lastName: _currentUser!.lastName,
+          email: _currentUser!.email,
+          phone: _currentUser!.phone,
+          type: _currentUser!.type,
+          freeJobsPosted: _currentUser!.freeJobsPosted + 1,
+          freeApplicationsUsed: _currentUser!.freeApplicationsUsed,
+          isPremium: _currentUser!.isPremium,
+          selectedBusinessId: _currentUser!.selectedBusinessId,
+          roles: _currentUser!.roles,
+          ownedBusinesses: _currentUser!.ownedBusinesses,
+          teamBusinesses: _currentUser!.teamBusinesses,
+        );
+        _currentUser = updatedUser;
+        _service.updateCurrentUser(_currentUser);
+      }
+
       notifyListeners();
       return job;
     } finally {
       _setBusy(false);
+    }
+  }
+
+  Future<void> loadJobPaymentHistory({bool forceRefresh = false}) async {
+    if (_isLoadingJobPayments) {
+      return;
+    }
+    if (!forceRefresh && _jobPayments.isNotEmpty) {
+      return;
+    }
+
+    _isLoadingJobPayments = true;
+    notifyListeners();
+    try {
+      final records =
+          await _service.employer.fetchJobPaymentHistory(limit: 100);
+      _jobPayments = records;
+    } catch (error, stackTrace) {
+      debugPrint('Error loading job payment history: $error');
+      debugPrint(stackTrace.toString());
+    } finally {
+      _isLoadingJobPayments = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadEmployerFeedback({bool forceRefresh = false}) async {
+    if (_activeRole != UserType.employer) {
+      return;
+    }
+    if (_isLoadingEmployerFeedback) {
+      return;
+    }
+    if (!forceRefresh && _employerFeedback.isNotEmpty) {
+      return;
+    }
+
+    _isLoadingEmployerFeedback = true;
+    notifyListeners();
+    try {
+      final feedback =
+          await _service.employer.fetchEmployerFeedback(limit: 100);
+      _employerFeedback = feedback;
+    } catch (error, stackTrace) {
+      debugPrint('Error loading employer feedback: $error');
+      debugPrint(stackTrace.toString());
+    } finally {
+      _isLoadingEmployerFeedback = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadWorkerEmploymentHistory({bool forceRefresh = false}) async {
+    if (_activeRole != UserType.worker) {
+      return;
+    }
+    if (_isLoadingEmploymentHistory) {
+      return;
+    }
+    if (!forceRefresh && _workerEmploymentHistory.isNotEmpty) {
+      return;
+    }
+
+    _isLoadingEmploymentHistory = true;
+    notifyListeners();
+    try {
+      final history = await _service.worker.fetchEmploymentHistory('me');
+      _workerEmploymentHistory = history;
+    } catch (error, stackTrace) {
+      debugPrint('Error loading employment history: $error');
+      debugPrint(stackTrace.toString());
+    } finally {
+      _isLoadingEmploymentHistory = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadWorkerFeedback({bool forceRefresh = false}) async {
+    if (_activeRole != UserType.worker) {
+      return;
+    }
+    if (_isLoadingWorkerFeedback) {
+      return;
+    }
+    if (!forceRefresh && _workerFeedback.isNotEmpty) {
+      return;
+    }
+
+    _isLoadingWorkerFeedback = true;
+    notifyListeners();
+    try {
+      final feedback = await _service.worker.fetchWorkerFeedback('me');
+      _workerFeedback = feedback;
+    } catch (error, stackTrace) {
+      debugPrint('Error loading worker feedback: $error');
+      debugPrint(stackTrace.toString());
+    } finally {
+      _isLoadingWorkerFeedback = false;
+      notifyListeners();
+    }
+  }
+
+  Future<EmployerFeedback?> submitEmployerFeedback({
+    required String employerId,
+    required int rating,
+    String? comment,
+    String? jobId,
+  }) async {
+    if (_activeRole != UserType.worker) {
+      throw Exception('Only workers can submit feedback');
+    }
+
+    try {
+      final feedback = await _service.worker.submitEmployerFeedback(
+        workerId: 'me',
+        employerId: employerId,
+        rating: rating,
+        comment: comment,
+        jobId: jobId,
+      );
+
+      final index = _workerFeedback.indexWhere((item) =>
+          item.employerId == feedback.employerId &&
+          item.jobId == feedback.jobId);
+
+      if (index >= 0) {
+        _workerFeedback[index] = feedback;
+      } else {
+        _workerFeedback = [feedback, ..._workerFeedback];
+      }
+
+      notifyListeners();
+
+      // If the worker is viewing an employer profile for the same employer,
+      // refresh cached employer feedback so the new review appears immediately.
+      if (_employerFeedback.any((item) =>
+          item.employerId == feedback.employerId &&
+          item.workerId == feedback.workerId)) {
+        await loadEmployerFeedback(forceRefresh: true);
+      }
+
+      return feedback;
+    } catch (error, stackTrace) {
+      debugPrint('Error submitting employer feedback: $error');
+      debugPrint(stackTrace.toString());
+      rethrow;
     }
   }
 
@@ -844,63 +1454,44 @@ class AppState extends ChangeNotifier {
     try {
       print('🔄 Updating job status via API: $jobId to $status');
 
-      // TODO: Replace with actual API call to update job status
-      // Example: PATCH /jobs/{jobId} with { "status": "closed" }
-      final uri = Uri.parse('https://dhruvbackend.vercel.app/api/jobs/$jobId');
-
-      final body = {
-        'status': status.name,
-      };
-
-      final response = await http.patch(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          if (_service.authToken != null)
-            'Authorization': 'Bearer ${_service.authToken}',
-        },
-        body: json.encode(body),
+      await _service.job.updateJobStatus(
+        jobId: jobId,
+        status: status,
       );
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        print('✓ Job status updated successfully');
+      print('✓ Job status updated successfully');
 
-        // Update the job status in the local list
-        final index = _employerJobs.indexWhere((job) => job.id == jobId);
-        if (index != -1) {
-          final job = _employerJobs[index];
-          _employerJobs[index] = JobPosting(
-            id: job.id,
-            title: job.title,
-            description: job.description,
-            employerId: job.employerId,
-            businessId: job.businessId,
-            hourlyRate: job.hourlyRate,
-            scheduleStart: job.scheduleStart,
-            scheduleEnd: job.scheduleEnd,
-            recurrence: job.recurrence,
-            overtimeRate: job.overtimeRate,
-            urgency: job.urgency,
-            tags: job.tags,
-            workDays: job.workDays,
-            isVerificationRequired: job.isVerificationRequired,
-            status: status, // Updated status
-            postedAt: job.postedAt,
-            businessName: job.businessName,
-            locationSummary: job.locationSummary,
-            applicantsCount: job.applicantsCount,
-            distanceMiles: job.distanceMiles,
-            hasApplied: job.hasApplied,
-            premiumRequired: job.premiumRequired,
-          );
-        }
-
-        notifyListeners();
-      } else {
-        print(
-            '⚠️ Update job status API error: ${response.statusCode} - ${response.body}');
-        throw Exception('Failed to update job status: ${response.statusCode}');
+      // Update the job status in the local list
+      final index = _employerJobs.indexWhere((job) => job.id == jobId);
+      if (index != -1) {
+        final job = _employerJobs[index];
+        _employerJobs[index] = JobPosting(
+          id: job.id,
+          title: job.title,
+          description: job.description,
+          employerId: job.employerId,
+          businessId: job.businessId,
+          hourlyRate: job.hourlyRate,
+          scheduleStart: job.scheduleStart,
+          scheduleEnd: job.scheduleEnd,
+          recurrence: job.recurrence,
+          overtimeRate: job.overtimeRate,
+          urgency: job.urgency,
+          tags: job.tags,
+          workDays: job.workDays,
+          isVerificationRequired: job.isVerificationRequired,
+          status: status, // Updated status
+          postedAt: job.postedAt,
+          businessName: job.businessName,
+          locationSummary: job.locationSummary,
+          applicantsCount: job.applicantsCount,
+          distanceMiles: job.distanceMiles,
+          hasApplied: job.hasApplied,
+          premiumRequired: job.premiumRequired,
+        );
       }
+
+      notifyListeners();
     } catch (error) {
       print('❌ Error updating job status: $error');
       rethrow;
@@ -909,24 +1500,439 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  void _ensureRazorpay() {
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+  }
+
+  void _handlePaymentSuccess(PaymentSuccessResponse response) {
+    final pending = _pendingJobPayment;
+    final completer = _paymentCompleter;
+    if (pending == null || completer == null) {
+      debugPrint('⚠️ Received Razorpay success without a pending payment.');
+      return;
+    }
+
+    final orderId = (response.orderId?.trim().isNotEmpty ?? false)
+        ? response.orderId!.trim()
+        : pending.orderId;
+    if (orderId.isEmpty) {
+      final error = Exception('Missing Razorpay order information.');
+      if (!completer.isCompleted) {
+        completer.completeError(error);
+      }
+      _clearPendingPayment();
+      return;
+    }
+
+    final paymentId =
+        response.paymentId ?? pending.paymentMethodHint ?? 'razorpay';
+    final signature = response.signature?.trim();
+    if (signature == null || signature.isEmpty) {
+      final error = Exception('Missing Razorpay payment signature.');
+      if (!completer.isCompleted) {
+        completer.completeError(error);
+      }
+      _clearPendingPayment();
+      return;
+    }
+
+    final verifyFuture = verifyJobPostingPayment(
+      jobId: pending.jobId,
+      amount: pending.amount,
+      currency: pending.currency,
+      orderId: orderId,
+      paymentId: paymentId,
+      signature: signature,
+      publishAfterPayment: true,
+    );
+
+    verifyFuture.then((_) {
+      _markJobPaymentComplete(pending.jobId);
+      _promoteCurrentUserToPremium();
+      notifyListeners();
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+    }).catchError(
+      (Object error, StackTrace stackTrace) {
+        debugPrint('❌ Failed to record Razorpay payment: $error');
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      },
+    ).whenComplete(_clearPendingPayment);
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    final completer = _paymentCompleter;
+    final rawMessage = response.message;
+    final parsedMessage = (rawMessage == null || rawMessage.trim().isEmpty)
+        ? 'Payment cancelled'
+        : rawMessage.trim();
+
+    if (completer != null && !completer.isCompleted) {
+      completer.completeError(
+        Exception('Payment failed (${response.code}): $parsedMessage'),
+      );
+    }
+    _clearPendingPayment();
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    debugPrint('ℹ️ External wallet selected: ${response.walletName}');
+  }
+
+  void _clearPendingPayment() {
+    _paymentCompleter = null;
+    _pendingJobPayment = null;
+  }
+
   Future<void> processJobPostingPayment({
     required String jobId,
     required double amount,
     String? currency,
     String? paymentMethodId,
   }) async {
-    _setBusy(true);
-    try {
-      // Mark job as paid in the list (using a new property or tag)
-      // This is a simplified implementation
-      print('Processing payment for job: $jobId');
-      print('Amount: $amount ${currency ?? 'USD'}');
-      print('Payment method: ${paymentMethodId ?? 'default'}');
+    if (amount <= 0) {
+      throw ArgumentError('Amount must be greater than zero.');
+    }
 
-      notifyListeners();
+    if (_paymentCompleter != null) {
+      throw StateError('Another payment is already in progress.');
+    }
+
+    final keyId = EnvironmentConfig.razorpayKeyId;
+    if (keyId == null || keyId.isEmpty) {
+      throw StateError(
+        'Razorpay key is not configured. Provide RAZORPAY_KEY_ID via --dart-define or update EnvironmentConfig.',
+      );
+    }
+
+    final selectedCurrency = (currency ?? 'INR').toUpperCase();
+    final user = _currentUser;
+    final contact = user?.phone ?? '';
+    final nameParts = '${user?.firstName ?? ''} ${user?.lastName ?? ''}'.trim();
+    final customerName =
+        nameParts.isEmpty ? (user?.email ?? 'Employer') : nameParts;
+
+    try {
+      _setBusy(true);
+      _ensureRazorpay();
+
+      final orderId = await createRazorpayOrder(
+        amount: amount,
+        currency: selectedCurrency,
+        jobId: jobId,
+      );
+
+      final completer = Completer<void>();
+      _paymentCompleter = completer;
+      _pendingJobPayment = _PendingJobPayment(
+        jobId: jobId,
+        amount: amount,
+        currency: selectedCurrency,
+        orderId: orderId,
+        paymentMethodHint: paymentMethodId,
+      );
+
+      final options = {
+        'key': keyId,
+        'amount': (amount * 100).round(),
+        'currency': selectedCurrency,
+        'name': 'Dhruv Talent',
+        'order_id': orderId,
+        'description': 'Job posting payment',
+        'timeout': PaymentConfig.paymentTimeoutSeconds,
+        'prefill': {
+          'contact': contact,
+          'email': user?.email ?? '',
+          'name': customerName,
+        },
+        'notes': {
+          'jobId': jobId,
+        },
+      };
+
+      try {
+        _razorpay.open(options);
+      } catch (error) {
+        _clearPendingPayment();
+        rethrow;
+      }
+      await completer.future;
+      await refreshActiveRole();
+    } on PlatformException catch (error) {
+      _clearPendingPayment();
+      throw Exception('Failed to launch payment: ${error.message}');
+    } catch (error) {
+      if (_pendingJobPayment != null) {
+        _clearPendingPayment();
+      }
+      rethrow;
     } finally {
       _setBusy(false);
     }
+  }
+
+  AttendanceStatus _attendanceStatusFromString(dynamic value) {
+    final normalized = value?.toString().toLowerCase();
+    switch (normalized) {
+      case 'clocked-in':
+      case 'clockedin':
+      case 'clocked_in':
+        return AttendanceStatus.clockedIn;
+      case 'completed':
+        return AttendanceStatus.completed;
+      case 'missed':
+        return AttendanceStatus.missed;
+      case 'scheduled':
+      default:
+        return AttendanceStatus.scheduled;
+    }
+  }
+
+  String _attendanceStatusToFilter(AttendanceStatus status) {
+    switch (status) {
+      case AttendanceStatus.clockedIn:
+        return 'clocked-in';
+      case AttendanceStatus.completed:
+        return 'completed';
+      case AttendanceStatus.missed:
+        return 'missed';
+      case AttendanceStatus.scheduled:
+        return 'scheduled';
+    }
+  }
+
+  bool _statusMatchesFilter(AttendanceStatus status, String filter) {
+    if (filter == 'all') {
+      return true;
+    }
+    return _attendanceStatusToFilter(status) == filter;
+  }
+
+  int _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) {
+      return int.tryParse(value) ?? 0;
+    }
+    return 0;
+  }
+
+  double _asDouble(dynamic value) {
+    if (value is double) return value;
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      return double.tryParse(value) ?? 0.0;
+    }
+    return 0.0;
+  }
+
+  bool _asBool(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.toLowerCase();
+      return normalized == 'true' || normalized == '1';
+    }
+    return false;
+  }
+
+  DateTime? _combineDateAndTime(String? date, String? time) {
+    if (date == null || date.isEmpty) {
+      return null;
+    }
+    final base = DateTime.tryParse(date);
+    if (base == null) {
+      return null;
+    }
+    if (time == null || time.isEmpty) {
+      return base;
+    }
+    final parts = time.split(':');
+    final hour = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 0 : 0;
+    final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    return DateTime(base.year, base.month, base.day, hour, minute);
+  }
+
+  AttendanceRecord? _mapManagementRecord(Map<String, dynamic>? json) {
+    if (json == null) {
+      return null;
+    }
+
+    final dateStr = json['date']?.toString();
+    final scheduledStart =
+        _combineDateAndTime(dateStr, json['scheduledStart']?.toString()) ??
+            DateTime.now();
+    final scheduledEnd =
+        _combineDateAndTime(dateStr, json['scheduledEnd']?.toString()) ??
+            scheduledStart;
+    final clockIn = _combineDateAndTime(dateStr, json['clockIn']?.toString());
+    final clockOut = _combineDateAndTime(dateStr, json['clockOut']?.toString());
+
+    return AttendanceRecord(
+      id: json['id']?.toString() ?? json['_id']?.toString() ?? '',
+      workerId: json['workerId']?.toString() ?? '',
+      jobId: json['jobId']?.toString() ?? '',
+      businessId:
+          json['businessId']?.toString() ?? json['business']?.toString() ?? '',
+      scheduledStart: scheduledStart,
+      scheduledEnd: scheduledEnd,
+      status: _attendanceStatusFromString(json['status']),
+      totalHours: _asDouble(json['totalHours'] ?? json['hoursWorked']),
+      earnings: _asDouble(json['earnings']),
+      isLate: _asBool(json['isLate']),
+      clockIn: clockIn,
+      clockOut: clockOut,
+      locationSummary: json['location']?.toString(),
+      jobTitle: json['jobTitle']?.toString(),
+      hourlyRate: _asDouble(json['hourlyRate']),
+      workerName: json['workerName']?.toString(),
+    );
+  }
+
+  AttendanceRecord _mapTimelineRecord(
+    Map<String, dynamic> json,
+    String workerId,
+    String? workerName,
+  ) {
+    final dateStr = json['date']?.toString();
+    final scheduledStart =
+        _combineDateAndTime(dateStr, json['scheduledStart']?.toString()) ??
+            DateTime.now();
+    final scheduledEnd =
+        _combineDateAndTime(dateStr, json['scheduledEnd']?.toString()) ??
+            scheduledStart;
+    final clockIn = _combineDateAndTime(dateStr, json['clockIn']?.toString());
+    final clockOut = _combineDateAndTime(dateStr, json['clockOut']?.toString());
+
+    String jobId = '';
+    String? jobTitle;
+    double? hourlyRate;
+    final job = json['job'];
+    if (job is Map<String, dynamic>) {
+      jobId = job['id']?.toString() ?? job['_id']?.toString() ?? '';
+      jobTitle = job['title']?.toString();
+      hourlyRate = _asDouble(job['hourlyRate']);
+      if (hourlyRate == 0.0) {
+        hourlyRate = null;
+      }
+    } else if (job is String) {
+      jobId = job;
+    }
+
+    String businessId = '';
+    String? companyName;
+    final business = json['business'];
+    if (business is Map<String, dynamic>) {
+      businessId =
+          business['id']?.toString() ?? business['_id']?.toString() ?? '';
+      companyName = business['name']?.toString();
+    } else if (business is String) {
+      businessId = business;
+    }
+
+    return AttendanceRecord(
+      id: json['id']?.toString() ?? json['_id']?.toString() ?? '',
+      workerId: workerId,
+      jobId: jobId,
+      businessId: businessId,
+      scheduledStart: scheduledStart,
+      scheduledEnd: scheduledEnd,
+      status: _attendanceStatusFromString(json['status']),
+      totalHours: _asDouble(json['hoursWorked'] ?? json['totalHours']),
+      earnings: _asDouble(json['earnings']),
+      isLate: _asBool(json['isLate']),
+      clockIn: clockIn,
+      clockOut: clockOut,
+      locationSummary: json['location']?.toString(),
+      jobTitle: jobTitle ?? json['jobTitle']?.toString(),
+      hourlyRate: hourlyRate ?? _asDouble(json['hourlyRate']),
+      companyName: companyName,
+      workerName: workerName,
+    );
+  }
+
+  AttendanceDashboardSummary _buildAttendanceSummary(
+    List<AttendanceRecord> records,
+  ) {
+    final completed = records
+        .where((record) => record.status == AttendanceStatus.completed)
+        .length;
+    final totalHours =
+        records.fold<double>(0, (sum, record) => sum + record.totalHours);
+    final totalPayroll =
+        records.fold<double>(0, (sum, record) => sum + record.earnings);
+    final lateArrivals = records.where((record) => record.isLate).length;
+
+    return AttendanceDashboardSummary(
+      totalWorkers: records.length,
+      completedShifts: completed,
+      totalHours: totalHours,
+      totalPayroll: totalPayroll,
+      lateArrivals: lateArrivals,
+    );
+  }
+
+  void _upsertAttendanceRecord(AttendanceRecord record) {
+    if (_attendanceDashboard == null) {
+      return;
+    }
+
+    final recordDate = DateTime(
+      record.scheduledStart.year,
+      record.scheduledStart.month,
+      record.scheduledStart.day,
+    );
+    final selectedDate = DateTime(
+      _attendanceSelectedDate.year,
+      _attendanceSelectedDate.month,
+      _attendanceSelectedDate.day,
+    );
+
+    if (recordDate != selectedDate) {
+      return;
+    }
+
+    if (!_statusMatchesFilter(record.status, _attendanceStatusFilter)) {
+      return;
+    }
+
+    final records = [..._attendanceDashboard!.records];
+    final index = records.indexWhere((item) => item.id == record.id);
+    if (index >= 0) {
+      records[index] = record;
+    } else {
+      records.add(record);
+      records.sort(
+        (a, b) => a.scheduledStart.compareTo(b.scheduledStart),
+      );
+    }
+
+    final summary = _buildAttendanceSummary(records);
+    _attendanceDashboard = _attendanceDashboard!.copyWith(
+      records: records,
+      summary: summary,
+    );
+    _attendanceSummary = summary;
+  }
+
+  Future<void> _refreshWorkerScheduleIfCached(String workerId) async {
+    final cacheKey = _extractObjectId(workerId) ?? workerId;
+    final cached = _workerAttendanceSchedules[cacheKey];
+    if (cached == null) {
+      return;
+    }
+    unawaited(
+      loadWorkerAttendanceSchedule(
+        workerId: cacheKey,
+        status: cached.statusFilter,
+      ),
+    );
   }
 
   // ================== Attendance Methods ==================
@@ -937,78 +1943,62 @@ class AppState extends ChangeNotifier {
     _isAttendanceBusy = true;
     notifyListeners();
 
+    final targetDate = date ?? _attendanceSelectedDate;
+    final targetFilter = (status ?? _attendanceStatusFilter).toLowerCase();
+
     try {
-      final targetDate = date ?? _attendanceSelectedDate;
-      final targetFilter = status ?? _attendanceStatusFilter;
+      final token = _service.authToken;
+      if (token == null || token.isEmpty) {
+        throw Exception('Authentication required to load attendance data');
+      }
 
       _attendanceSelectedDate = targetDate;
       _attendanceStatusFilter = targetFilter;
 
-      // TODO: Replace with actual API call to /attendance/management
-      // Example: GET /attendance/management?date=2024-10-01&status=all
-      // This should call your backend endpoint and populate real data
-      print(
-          'Loading attendance dashboard for date: ${targetDate.toIso8601String().split('T')[0]}, status: $targetFilter');
+      final response = await _service.attendance.getManagementView(
+        authToken: token,
+        date: targetDate,
+        status: targetFilter == 'all' ? null : targetFilter,
+      );
 
-      // For now, create enhanced mock data that matches your backend structure
-      final mockRecords = <AttendanceRecord>[
-        AttendanceRecord(
-          id: 'att_1',
-          workerId: 'worker_1',
-          jobId: 'job_1',
-          businessId: 'business_1',
-          scheduledStart: targetDate.copyWith(hour: 9, minute: 0),
-          scheduledEnd: targetDate.copyWith(hour: 17, minute: 0),
-          status: AttendanceStatus.completed,
-          totalHours: 8.0,
-          earnings: 120.0,
-          isLate: false,
-          clockIn: targetDate.copyWith(hour: 8, minute: 55),
-          clockOut: targetDate.copyWith(hour: 17, minute: 5),
-          workerName: 'John Doe',
-          jobTitle: 'Customer Service',
-          hourlyRate: 15.0,
-          locationSummary: 'Downtown Office',
-        ),
-        AttendanceRecord(
-          id: 'att_2',
-          workerId: 'worker_2',
-          jobId: 'job_2',
-          businessId: 'business_1',
-          scheduledStart: targetDate.copyWith(hour: 10, minute: 0),
-          scheduledEnd: targetDate.copyWith(hour: 18, minute: 0),
-          status: AttendanceStatus.clockedIn,
-          totalHours: 0.0,
-          earnings: 0.0,
-          isLate: true,
-          clockIn: targetDate.copyWith(hour: 10, minute: 15),
-          workerName: 'Jane Smith',
-          jobTitle: 'Sales Associate',
-          hourlyRate: 16.0,
-          locationSummary: 'Mall Store',
-        ),
-      ];
+      final payload = (response['data'] as Map<String, dynamic>?) ??
+          const <String, dynamic>{};
+      final recordsRaw = payload['records'] as List<dynamic>? ?? const [];
 
-      final mockSummary = AttendanceDashboardSummary(
-        totalWorkers: mockRecords.length,
-        completedShifts: mockRecords
-            .where((r) => r.status == AttendanceStatus.completed)
-            .length,
-        totalHours: mockRecords.fold<double>(0, (sum, r) => sum + r.totalHours),
-        totalPayroll: mockRecords.fold<double>(0, (sum, r) => sum + r.earnings),
-        lateArrivals: mockRecords.where((r) => r.isLate).length,
+      final parsedRecords = recordsRaw
+          .whereType<Map<String, dynamic>>()
+          .map(_mapManagementRecord)
+          .whereType<AttendanceRecord>()
+          .where(
+            (record) => _statusMatchesFilter(record.status, targetFilter),
+          )
+          .toList()
+        ..sort(
+          (a, b) => a.scheduledStart.compareTo(b.scheduledStart),
+        );
+
+      final summaryMap = (payload['summary'] as Map<String, dynamic>?) ??
+          const <String, dynamic>{};
+
+      final summary = AttendanceDashboardSummary(
+        totalWorkers: _asInt(summaryMap['totalWorkers']),
+        completedShifts: _asInt(summaryMap['completedShifts']),
+        totalHours: _asDouble(summaryMap['totalHours']),
+        totalPayroll: _asDouble(summaryMap['totalPayroll']),
+        lateArrivals: _asInt(summaryMap['lateArrivals']),
       );
 
       _attendanceDashboard = AttendanceDashboard(
         date: targetDate,
         statusFilter: targetFilter,
-        records: mockRecords,
-        summary: mockSummary,
+        records: parsedRecords,
+        summary: summary,
       );
-
-      _attendanceSummary = mockSummary;
-    } catch (error) {
-      print('Error loading attendance dashboard: $error');
+      _attendanceSummary = summary;
+    } catch (error, stackTrace) {
+      debugPrint('Error loading attendance dashboard: $error');
+      debugPrint(stackTrace.toString());
+      rethrow;
     } finally {
       _isAttendanceBusy = false;
       notifyListeners();
@@ -1019,55 +2009,105 @@ class AppState extends ChangeNotifier {
     required String workerId,
     String? status,
   }) async {
-    if (workerId.isEmpty) return;
+    final normalizedWorkerId = _extractObjectId(workerId) ?? workerId;
+    if (normalizedWorkerId.isEmpty) return;
 
-    _workerScheduleLoading[workerId] = true;
+    _workerScheduleLoading[normalizedWorkerId] = true;
     notifyListeners();
 
+    final targetFilter = (status ?? 'all').toLowerCase();
+
     try {
-      final targetFilter = status ?? 'all';
+      final token = _service.authToken;
+      if (token == null || token.isEmpty) {
+        throw Exception('Authentication required to load worker schedule');
+      }
 
-      // TODO: Replace with actual API call
-      // For now, create mock data
-      final mockDays = <AttendanceScheduleDay>[
-        AttendanceScheduleDay(
-          date: DateTime.now(),
-          records: [
-            AttendanceRecord(
-              id: 'att_1',
-              workerId: 'worker_1',
-              jobId: 'job_1',
-              businessId: 'business_1',
-              scheduledStart: DateTime.now().copyWith(hour: 9, minute: 0),
-              scheduledEnd: DateTime.now().copyWith(hour: 17, minute: 0),
-              status: AttendanceStatus.scheduled,
-              totalHours: 8.0,
-              earnings: 120.0,
-              isLate: false,
-            ),
-          ],
-          totalHours: 8.0,
-          totalEarnings: 120.0,
-          scheduledCount: 1,
-          completedCount: 0,
-        ),
-      ];
-
-      final schedule = AttendanceSchedule(
-        workerId: workerId,
-        statusFilter: targetFilter,
-        days: mockDays,
-        workerName: 'John Doe',
-        totalHours: 8.0,
-        totalEarnings: 120.0,
-        totalRecords: 1,
+      final response = await _service.attendance.getWorkerEmploymentTimeline(
+        authToken: token,
+        workerId: normalizedWorkerId,
       );
 
-      _workerAttendanceSchedules[workerId] = schedule;
-    } catch (error) {
-      print('Error loading worker schedule: $error');
+      final data = (response['data'] as Map<String, dynamic>?) ??
+          const <String, dynamic>{};
+      final workerInfo = data['worker'] as Map<String, dynamic>?;
+      final workerName = workerInfo?['name']?.toString();
+
+      final recordsRaw =
+          data['attendanceRecords'] as List<dynamic>? ?? const [];
+      final parsedRecords = recordsRaw
+          .whereType<Map<String, dynamic>>()
+          .map((json) => _mapTimelineRecord(json, workerId, workerName))
+          .where(
+            (record) => _statusMatchesFilter(record.status, targetFilter),
+          )
+          .toList()
+        ..sort(
+          (a, b) => a.scheduledStart.compareTo(b.scheduledStart),
+        );
+
+      final grouped = <DateTime, List<AttendanceRecord>>{};
+      for (final record in parsedRecords) {
+        final key = DateTime(
+          record.scheduledStart.year,
+          record.scheduledStart.month,
+          record.scheduledStart.day,
+        );
+        grouped.putIfAbsent(key, () => []).add(record);
+      }
+
+      final days = grouped.entries.map((entry) {
+        final records = entry.value;
+        final totalHours =
+            records.fold<double>(0, (sum, record) => sum + record.totalHours);
+        final totalEarnings =
+            records.fold<double>(0, (sum, record) => sum + record.earnings);
+        final completedCount = records
+            .where((record) => record.status == AttendanceStatus.completed)
+            .length;
+
+        return AttendanceScheduleDay(
+          date: entry.key,
+          records: records,
+          totalHours: totalHours,
+          totalEarnings: totalEarnings,
+          scheduledCount: records.length,
+          completedCount: completedCount,
+        );
+      }).toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+
+      final summary = (data['summary'] as Map<String, dynamic>?) ??
+          const <String, dynamic>{};
+
+      final schedule = AttendanceSchedule(
+        workerId: normalizedWorkerId,
+        statusFilter: targetFilter,
+        days: days,
+        workerName: workerName,
+        from: days.isNotEmpty ? days.first.date : null,
+        to: days.isNotEmpty ? days.last.date : null,
+        totalHours: summary.isNotEmpty
+            ? _asDouble(summary['totalHoursWorked'])
+            : parsedRecords.fold<double>(
+                0, (sum, record) => sum + record.totalHours),
+        totalEarnings: summary.isNotEmpty
+            ? _asDouble(summary['totalEarnings'])
+            : parsedRecords.fold<double>(
+                0, (sum, record) => sum + record.earnings),
+        totalRecords: summary.isNotEmpty
+            ? _asInt(summary['totalAttendanceRecords'])
+            : parsedRecords.length,
+      );
+
+      _workerAttendanceSchedules[normalizedWorkerId] = schedule;
+    } catch (error, stackTrace) {
+      debugPrint(
+          'Error loading worker schedule for $normalizedWorkerId: $error');
+      debugPrint(stackTrace.toString());
+      rethrow;
     } finally {
-      _workerScheduleLoading[workerId] = false;
+      _workerScheduleLoading[normalizedWorkerId] = false;
       notifyListeners();
     }
   }
@@ -1075,45 +2115,14 @@ class AppState extends ChangeNotifier {
   Future<void> markEmployerAttendanceComplete(String recordId) async {
     _setBusy(true);
     try {
-      // TODO: Replace with actual API call
-      print('Marking attendance record complete: $recordId');
-
-      // Update local data if needed
-      if (_attendanceDashboard != null) {
-        final updatedRecords = _attendanceDashboard!.records.map((record) {
-          if (record.id == recordId) {
-            return AttendanceRecord(
-              id: record.id,
-              workerId: record.workerId,
-              jobId: record.jobId,
-              businessId: record.businessId,
-              scheduledStart: record.scheduledStart,
-              scheduledEnd: record.scheduledEnd,
-              status: AttendanceStatus.completed,
-              totalHours: record.totalHours,
-              earnings: record.earnings,
-              isLate: record.isLate,
-              clockIn: record.clockIn,
-              clockOut: record.clockOut ?? DateTime.now(),
-              locationSummary: record.locationSummary,
-              jobTitle: record.jobTitle,
-              hourlyRate: record.hourlyRate,
-              companyName: record.companyName,
-              location: record.location,
-              workerName: record.workerName,
-              workerAvatarUrl: record.workerAvatarUrl,
-            );
-          }
-          return record;
-        }).toList();
-
-        _attendanceDashboard =
-            _attendanceDashboard!.copyWith(records: updatedRecords);
-      }
-
+      final updated = await _service.employer.markAttendanceComplete(recordId);
+      _upsertAttendanceRecord(updated);
+      await _refreshWorkerScheduleIfCached(updated.workerId);
       notifyListeners();
-    } catch (error) {
-      print('Error marking attendance complete: $error');
+    } catch (error, stackTrace) {
+      debugPrint('Error marking attendance complete: $error');
+      debugPrint(stackTrace.toString());
+      rethrow;
     } finally {
       _setBusy(false);
     }
@@ -1126,47 +2135,18 @@ class AppState extends ChangeNotifier {
   }) async {
     _setBusy(true);
     try {
-      // TODO: Replace with actual API call
-      print(
-          'Updating attendance hours for record: $attendanceId, hours: $totalHours');
-
-      // Update local data if needed
-      if (_attendanceDashboard != null) {
-        final updatedRecords = _attendanceDashboard!.records.map((record) {
-          if (record.id == attendanceId) {
-            final rate = hourlyRate ?? record.hourlyRate ?? 15.0;
-            return AttendanceRecord(
-              id: record.id,
-              workerId: record.workerId,
-              jobId: record.jobId,
-              businessId: record.businessId,
-              scheduledStart: record.scheduledStart,
-              scheduledEnd: record.scheduledEnd,
-              status: record.status,
-              totalHours: totalHours,
-              earnings: totalHours * rate,
-              isLate: record.isLate,
-              clockIn: record.clockIn,
-              clockOut: record.clockOut,
-              locationSummary: record.locationSummary,
-              jobTitle: record.jobTitle,
-              hourlyRate: record.hourlyRate,
-              companyName: record.companyName,
-              location: record.location,
-              workerName: record.workerName,
-              workerAvatarUrl: record.workerAvatarUrl,
-            );
-          }
-          return record;
-        }).toList();
-
-        _attendanceDashboard =
-            _attendanceDashboard!.copyWith(records: updatedRecords);
-      }
-
+      final updated = await _service.employer.updateAttendanceHours(
+        attendanceId: attendanceId,
+        totalHours: totalHours,
+        hourlyRate: hourlyRate,
+      );
+      _upsertAttendanceRecord(updated);
+      await _refreshWorkerScheduleIfCached(updated.workerId);
       notifyListeners();
-    } catch (error) {
-      print('Error updating attendance hours: $error');
+    } catch (error, stackTrace) {
+      debugPrint('Error updating attendance hours: $error');
+      debugPrint(stackTrace.toString());
+      rethrow;
     } finally {
       _setBusy(false);
     }
@@ -1259,6 +2239,12 @@ class AppState extends ChangeNotifier {
             submittedAt: application.submittedAt,
             note: application.note,
           );
+
+          // Trigger notification to worker about being hired
+          _sendHireNotification(application);
+
+          // Force immediate notification refresh for all users
+          _forceNotificationRefresh();
         }
 
         notifyListeners();
@@ -1339,6 +2325,47 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Send hire notification to worker
+  Future<void> _sendHireNotification(Application application) async {
+    try {
+      print('📧 Sending hire notification to worker: ${application.workerId}');
+
+      // Create notification payload
+      final notificationData = {
+        'type': 'hire',
+        'recipientId': application.workerId,
+        'title': 'Congratulations! You\'ve been hired',
+        'message': 'Your application has been accepted. Welcome to the team!',
+        'applicationId': application.id,
+        'jobId': application.jobId,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      // Send notification to backend
+      final uri =
+          Uri.parse('https://dhruvbackend.vercel.app/api/notifications');
+      final response = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          if (_service.authToken != null)
+            'Authorization': 'Bearer ${_service.authToken}',
+        },
+        body: json.encode(notificationData),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        print('✅ Hire notification sent successfully');
+      } else {
+        print(
+            '⚠️ Failed to send hire notification: ${response.statusCode} - ${response.body}');
+      }
+    } catch (error) {
+      print('❌ Error sending hire notification: $error');
+      // Don't rethrow - notification failure shouldn't break the hiring process
+    }
+  }
+
   // ================== Worker Methods ==================
 
   // Worker Attendance Methods
@@ -1363,43 +2390,26 @@ class AppState extends ChangeNotifier {
   Future<AttendanceRecord> clockInWorkerAttendance(String recordId) async {
     _setBusy(true);
     try {
-      // TODO: Replace with actual API call
-      print('Clocking in worker attendance: $recordId');
-
-      // Find and update the attendance record
-      final recordIndex = _workerAttendance.indexWhere((r) => r.id == recordId);
-      if (recordIndex != -1) {
-        final record = _workerAttendance[recordIndex];
-        final updatedRecord = AttendanceRecord(
-          id: record.id,
-          workerId: record.workerId,
-          jobId: record.jobId,
-          businessId: record.businessId,
-          scheduledStart: record.scheduledStart,
-          scheduledEnd: record.scheduledEnd,
-          status: AttendanceStatus.clockedIn,
-          totalHours: record.totalHours,
-          earnings: record.earnings,
-          isLate: record.isLate,
-          clockIn: DateTime.now(),
-          clockOut: record.clockOut,
-          locationSummary: record.locationSummary,
-          jobTitle: record.jobTitle,
-          hourlyRate: record.hourlyRate,
-          companyName: record.companyName,
-          location: record.location,
-          workerName: record.workerName,
-          workerAvatarUrl: record.workerAvatarUrl,
+      final location = await LocationService.instance.getHighAccuracyLocation();
+      if (location == null) {
+        throw const LocationException(
+          'Unable to determine your current location. Please enable location services and try again.',
         );
-
-        _workerAttendance[recordIndex] = updatedRecord;
-        notifyListeners();
-        return updatedRecord;
-      } else {
-        throw Exception('Attendance record not found');
       }
-    } catch (error) {
-      print('Error clocking in worker attendance: $error');
+
+      final updatedRecord = await _service.worker.clockIn(
+        recordId,
+        location: location,
+      );
+
+      _upsertWorkerAttendanceRecord(updatedRecord);
+      return updatedRecord;
+    } on LocationException catch (error) {
+      debugPrint('Location error while clocking in: ${error.message}');
+      rethrow;
+    } catch (error, stackTrace) {
+      debugPrint('Error clocking in worker attendance: $error');
+      debugPrint(stackTrace.toString());
       rethrow;
     } finally {
       _setBusy(false);
@@ -1412,53 +2422,27 @@ class AppState extends ChangeNotifier {
   }) async {
     _setBusy(true);
     try {
-      // TODO: Replace with actual API call
-      print('Clocking out worker attendance: $recordId');
-
-      // Find and update the attendance record
-      final recordIndex = _workerAttendance.indexWhere((r) => r.id == recordId);
-      if (recordIndex != -1) {
-        final record = _workerAttendance[recordIndex];
-        final clockOut = DateTime.now();
-
-        // Calculate total hours and earnings if clock in exists
-        double totalHours = record.totalHours;
-        double earnings = record.earnings;
-        if (record.clockIn != null) {
-          totalHours = clockOut.difference(record.clockIn!).inMinutes / 60.0;
-          earnings = totalHours * hourlyRate;
-        }
-
-        final updatedRecord = AttendanceRecord(
-          id: record.id,
-          workerId: record.workerId,
-          jobId: record.jobId,
-          businessId: record.businessId,
-          scheduledStart: record.scheduledStart,
-          scheduledEnd: record.scheduledEnd,
-          status: AttendanceStatus.completed,
-          totalHours: totalHours,
-          earnings: earnings,
-          isLate: record.isLate,
-          clockIn: record.clockIn,
-          clockOut: clockOut,
-          locationSummary: record.locationSummary,
-          jobTitle: record.jobTitle,
-          hourlyRate: hourlyRate,
-          companyName: record.companyName,
-          location: record.location,
-          workerName: record.workerName,
-          workerAvatarUrl: record.workerAvatarUrl,
+      final location = await LocationService.instance.getHighAccuracyLocation();
+      if (location == null) {
+        throw const LocationException(
+          'Unable to determine your current location. Please enable location services and try again.',
         );
-
-        _workerAttendance[recordIndex] = updatedRecord;
-        notifyListeners();
-        return updatedRecord;
-      } else {
-        throw Exception('Attendance record not found');
       }
-    } catch (error) {
-      print('Error clocking out worker attendance: $error');
+
+      final updatedRecord = await _service.worker.clockOut(
+        recordId,
+        location: location,
+        hourlyRate: hourlyRate,
+      );
+
+      _upsertWorkerAttendanceRecord(updatedRecord);
+      return updatedRecord;
+    } on LocationException catch (error) {
+      debugPrint('Location error while clocking out: ${error.message}');
+      rethrow;
+    } catch (error, stackTrace) {
+      debugPrint('Error clocking out worker attendance: $error');
+      debugPrint(stackTrace.toString());
       rethrow;
     } finally {
       _setBusy(false);
@@ -1469,19 +2453,87 @@ class AppState extends ChangeNotifier {
   Future<void> loadWorkerJobs(String workerId) async {
     _setBusy(true);
     try {
-      print('Loading worker jobs for: $workerId');
+      print('🔍 Loading worker jobs for: $workerId');
+      print('🔍 Current user: ${_currentUser?.email}');
+      print('🔍 User type: ${_currentUser?.type}');
+      print('🔍 Auth token available: ${_service.authToken != null}');
+
+      // Debug authentication state
+      await _debugAuthenticationState();
 
       // Fetch available jobs from the API
       _workerJobs = await _service.worker.fetchWorkerJobs(workerId);
-      print('Loaded ${_workerJobs.length} worker jobs');
+      print('✅ Loaded ${_workerJobs.length} worker jobs');
 
       notifyListeners();
     } catch (error) {
-      print('Error loading worker jobs: $error');
+      print('❌ Error loading worker jobs: $error');
+
+      // Provide more specific error feedback
+      if (error.toString().contains('Authentication required') ||
+          error.toString().contains('401')) {
+        print('❌ Authentication issue: User might need to log in again');
+      } else if (error.toString().contains('404')) {
+        print('❌ Jobs API endpoint not found - check API configuration');
+      } else if (error.toString().contains('timeout') ||
+          error.toString().contains('SocketException')) {
+        print('❌ Network issue: Check internet connection');
+      }
+
+      // Set empty jobs list instead of rethrowing to prevent app crashes
+      _workerJobs = [];
+      notifyListeners();
       rethrow;
     } finally {
       _setBusy(false);
     }
+  }
+
+  Future<void> _debugAuthenticationState() async {
+    try {
+      print('🔍 === AUTHENTICATION DEBUG ===');
+      print(
+          '🔍 ServiceLocator authToken: ${_service.authToken?.substring(0, 20)}...');
+      print('🔍 ServiceLocator currentUser: ${_service.currentUser?.email}');
+      print('🔍 AppState currentUser: ${_currentUser?.email}');
+      print('🔍 User type: ${_currentUser?.type}');
+      print('🔍 User role: ${_currentUser?.roles}');
+      print('🔍 ===========================');
+    } catch (e) {
+      print('❌ Error in debug authentication: $e');
+    }
+  }
+
+  /// Debug method to test job fetching functionality
+  Future<Map<String, dynamic>> debugJobFetching() async {
+    final result = <String, dynamic>{
+      'success': false,
+      'error': null,
+      'jobCount': 0,
+      'authToken': _service.authToken != null,
+      'currentUser': _currentUser?.email,
+      'userType': _currentUser?.type.toString(),
+    };
+
+    try {
+      if (_currentUser == null) {
+        result['error'] = 'No current user';
+        return result;
+      }
+
+      if (_service.authToken == null) {
+        result['error'] = 'No auth token';
+        return result;
+      }
+
+      final jobs = await _service.worker.fetchWorkerJobs(_currentUser!.id);
+      result['success'] = true;
+      result['jobCount'] = jobs.length;
+    } catch (e) {
+      result['error'] = e.toString();
+    }
+
+    return result;
   }
 
   Future<void> submitWorkerApplication({
@@ -1541,7 +2593,7 @@ class AppState extends ChangeNotifier {
       }
 
       // Refresh notifications after submitting application
-      loadNotifications();
+      await loadNotifications();
 
       notifyListeners();
     } catch (error) {
@@ -1565,31 +2617,61 @@ class AppState extends ChangeNotifier {
   }) async {
     if (_workerProfile == null) return;
 
+    final workerId = _workerProfile!.id.isNotEmpty
+        ? _workerProfile!.id
+        : (_currentUser?.id ?? '');
+
+    if (workerId.isEmpty) {
+      debugPrint('⚠️ Cannot update worker profile: missing workerId');
+      return;
+    }
+
     _setBusy(true);
     try {
-      // Update the worker profile with new values
-      _workerProfile = WorkerProfile(
-        id: _workerProfile!.id,
-        firstName: firstName ?? _workerProfile!.firstName,
-        lastName: lastName ?? _workerProfile!.lastName,
-        email: _workerProfile!.email,
-        phone: phone ?? _workerProfile!.phone,
-        skills: skills ?? _workerProfile!.skills,
-        experience: experience ?? _workerProfile!.experience,
-        bio: bio ?? _workerProfile!.bio,
-        rating: _workerProfile!.rating,
-        completedJobs: _workerProfile!.completedJobs,
-        totalEarnings: _workerProfile!.totalEarnings,
-        languages: languages ?? _workerProfile!.languages,
-        availability: availability ?? _workerProfile!.availability,
-        isVerified: _workerProfile!.isVerified,
-        weeklyEarnings: _workerProfile!.weeklyEarnings,
-        preferredRadiusMiles: _workerProfile!.preferredRadiusMiles,
-        notificationsEnabled:
-            notificationsEnabled ?? _workerProfile!.notificationsEnabled,
+      final updatedProfile = await _service.worker.updateWorkerProfile(
+        workerId: workerId,
+        firstName: firstName,
+        lastName: lastName,
+        phone: phone,
+        bio: bio,
+        skills: skills,
+        experience: experience,
+        languages: languages,
+        availability: availability,
+        notificationsEnabled: notificationsEnabled,
       );
 
+      _workerProfile = updatedProfile;
+
+      if (_currentUser != null &&
+          (firstName != null || lastName != null || phone != null)) {
+        final updatedFirstName = firstName ?? _currentUser!.firstName;
+        final updatedLastName = lastName ?? _currentUser!.lastName;
+        final updatedPhone = phone ?? _currentUser!.phone;
+
+        _currentUser = User(
+          id: _currentUser!.id,
+          firstName: updatedFirstName,
+          lastName: updatedLastName,
+          email: _currentUser!.email,
+          phone: updatedPhone,
+          type: _currentUser!.type,
+          freeJobsPosted: _currentUser!.freeJobsPosted,
+          freeApplicationsUsed: _currentUser!.freeApplicationsUsed,
+          isPremium: _currentUser!.isPremium,
+          selectedBusinessId: _currentUser!.selectedBusinessId,
+          roles: _currentUser!.roles,
+          ownedBusinesses: _currentUser!.ownedBusinesses,
+          teamBusinesses: _currentUser!.teamBusinesses,
+        );
+        _service.updateCurrentUser(_currentUser);
+      }
+
       notifyListeners();
+    } catch (error, stackTrace) {
+      debugPrint('Error updating worker profile: $error');
+      debugPrint(stackTrace.toString());
+      rethrow;
     } finally {
       _setBusy(false);
     }
@@ -1833,6 +2915,8 @@ class AppState extends ChangeNotifier {
 
   // ================== Helpers ==================
   void _setBusy(bool value) {
+    developer.log('🔄 AppState busy state changing: $_isBusy -> $value',
+        name: 'AppState');
     _isBusy = value;
     notifyListeners();
   }
@@ -1861,6 +2945,14 @@ class AppState extends ChangeNotifier {
     _currentUserPermissions = <String>[];
     _currentUserPermissionsBusinessId = null;
     _isLoadingCurrentUserTeamMember = false;
+    _jobPayments = [];
+    _isLoadingJobPayments = false;
+    _employerFeedback = [];
+    _isLoadingEmployerFeedback = false;
+    _workerEmploymentHistory = [];
+    _isLoadingEmploymentHistory = false;
+    _workerFeedback = [];
+    _isLoadingWorkerFeedback = false;
     notifyListeners();
   }
 
@@ -1878,8 +2970,15 @@ class AppState extends ChangeNotifier {
       );
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return JobPosting.fromJson(data['job'] as Map<String, dynamic>);
+        final payload = json.decode(response.body);
+        final rawJob = payload['data'] ?? payload['job'];
+
+        if (rawJob is Map<String, dynamic>) {
+          return JobPosting.fromJson(rawJob);
+        }
+
+        print('Unexpected job payload shape: ${response.body}');
+        return null;
       } else {
         print('Failed to fetch job details: ${response.statusCode}');
         return null;
@@ -1890,44 +2989,44 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<bool> scheduleAttendanceForWorker({
+  Future<void> scheduleAttendanceForWorker({
     required String workerId,
     required String jobId,
-    required DateTime startDate,
-    required String location,
-    required double hoursScheduled,
+    required DateTime scheduledStart,
+    required DateTime scheduledEnd,
+    required double hourlyRate,
     String? notes,
   }) async {
+    final normalizedWorkerId = _extractObjectId(workerId) ?? workerId;
+    final normalizedJobId = _extractObjectId(jobId) ?? jobId;
+
+    if (normalizedWorkerId.isEmpty || normalizedJobId.isEmpty) {
+      throw ArgumentError(
+        'Invalid identifiers for scheduling attendance '
+        '(workerId: $workerId, jobId: $jobId)',
+      );
+    }
+
+    _setBusy(true);
     try {
-      final response = await http.post(
-        Uri.parse('https://dhruvbackend.vercel.app/api/attendance/schedule'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (_service.authToken != null)
-            'Authorization': 'Bearer ${_service.authToken}',
-        },
-        body: json.encode({
-          'workerId': workerId,
-          'jobId': jobId,
-          'startDate': startDate.toIso8601String(),
-          'location': location,
-          'hoursScheduled': hoursScheduled,
-          'notes': notes,
-        }),
+      final record = await _service.employer.scheduleAttendanceRecord(
+        workerId: normalizedWorkerId,
+        jobId: normalizedJobId,
+        scheduledStart: scheduledStart,
+        scheduledEnd: scheduledEnd,
+        hourlyRate: hourlyRate,
+        notes: notes,
       );
 
-      if (response.statusCode == 201) {
-        print('Attendance scheduled successfully');
-        // Refresh relevant data if needed
-        notifyListeners();
-        return true;
-      } else {
-        print('Failed to schedule attendance: ${response.statusCode}');
-        return false;
-      }
-    } catch (e) {
-      print('Error scheduling attendance: $e');
-      return false;
+      _upsertAttendanceRecord(record);
+      await _refreshWorkerScheduleIfCached(normalizedWorkerId);
+      notifyListeners();
+    } catch (error, stackTrace) {
+      debugPrint('Error scheduling attendance: $error');
+      debugPrint(stackTrace.toString());
+      rethrow;
+    } finally {
+      _setBusy(false);
     }
   }
 
@@ -1977,5 +3076,147 @@ class AppState extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  void _markJobPaymentComplete(String jobId) {
+    final index = _employerJobs.indexWhere((job) => job.id == jobId);
+    if (index == -1) {
+      return;
+    }
+
+    final job = _employerJobs[index];
+    final updated = JobPosting(
+      id: job.id,
+      title: job.title,
+      description: job.description,
+      employerId: job.employerId,
+      businessId: job.businessId,
+      hourlyRate: job.hourlyRate,
+      scheduleStart: job.scheduleStart,
+      scheduleEnd: job.scheduleEnd,
+      recurrence: job.recurrence,
+      overtimeRate: job.overtimeRate,
+      urgency: job.urgency,
+      tags: List<String>.from(job.tags),
+      workDays: List<String>.from(job.workDays),
+      isVerificationRequired: job.isVerificationRequired,
+      status: JobStatus.active,
+      postedAt: job.postedAt,
+      distanceMiles: job.distanceMiles,
+      hasApplied: job.hasApplied,
+      premiumRequired: false,
+      locationSummary: job.locationSummary,
+      applicantsCount: job.applicantsCount,
+      businessName: job.businessName,
+      employerEmail: job.employerEmail,
+      employerName: job.employerName,
+      createdById: job.createdById,
+      createdByTag: job.createdByTag,
+      createdByEmail: job.createdByEmail,
+      createdByName: job.createdByName,
+    );
+
+    final updatedJobs = List<JobPosting>.from(_employerJobs);
+    updatedJobs[index] = updated;
+    _employerJobs = updatedJobs;
+  }
+
+  void _promoteCurrentUserToPremium() {
+    final user = _currentUser;
+    if (user == null || user.isPremium) {
+      return;
+    }
+
+    _currentUser = User(
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      phone: user.phone,
+      type: user.type,
+      freeJobsPosted: user.freeJobsPosted,
+      freeApplicationsUsed: user.freeApplicationsUsed,
+      isPremium: true,
+      selectedBusinessId: user.selectedBusinessId,
+      roles: List<UserType>.from(user.roles),
+      ownedBusinesses: List<BusinessAssociation>.from(user.ownedBusinesses),
+      teamBusinesses: List<BusinessAssociation>.from(user.teamBusinesses),
+    );
+
+    _service.updateCurrentUser(_currentUser);
+  }
+}
+
+class _PendingJobPayment {
+  const _PendingJobPayment({
+    required this.jobId,
+    required this.amount,
+    required this.currency,
+    required this.orderId,
+    this.paymentMethodHint,
+  });
+
+  final String jobId;
+  final double amount;
+  final String currency;
+  final String orderId;
+  final String? paymentMethodHint;
+}
+
+// Worker preference methods
+extension WorkerPreferencesMethods on AppState {
+  Future<void> updateWorkerNotificationSettings({
+    bool? pushEnabled,
+    bool? emailEnabled,
+  }) async {
+    _setBusy(true);
+    try {
+      final updatedProfile = await _service.worker.updateWorkerProfile(
+        workerId: _workerProfile?.id ?? '',
+        notificationsEnabled: pushEnabled,
+        emailNotificationsEnabled: emailEnabled,
+      );
+      _workerProfile = updatedProfile;
+      notifyListeners();
+    } finally {
+      _setBusy(false);
+    }
+  }
+
+  Future<void> updatePrivacySettings({
+    bool? isVisible,
+    bool? locationEnabled,
+    bool? shareWorkHistory,
+  }) async {
+    _setBusy(true);
+    try {
+      final updatedProfile =
+          await _service.workerPreferences.updatePrivacySettings(
+        isVisible: isVisible,
+        locationEnabled: locationEnabled,
+        shareWorkHistory: shareWorkHistory,
+      );
+      _workerProfile = updatedProfile as WorkerProfile?;
+      notifyListeners();
+    } finally {
+      _setBusy(false);
+    }
+  }
+
+  Future<void> deleteAccount() async {
+    _setBusy(true);
+    try {
+      await _service.workerPreferences.deleteAccount();
+
+      // Clear all local data
+      _currentUser = null;
+      _activeRole = null;
+      _workerProfile = null;
+      _employerProfile = null;
+      await _service.auth.logout();
+      notifyListeners();
+    } finally {
+      _setBusy(false);
+    }
   }
 }

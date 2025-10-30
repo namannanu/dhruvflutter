@@ -1,6 +1,6 @@
 import Flutter
-import GoogleMaps
 import UIKit
+import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -8,11 +8,64 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    if let apiKey = Bundle.main.object(forInfoDictionaryKey: "GMSApiKey") as? String,
-       !apiKey.isEmpty {
-      GMSServices.provideAPIKey(apiKey)
-    }
     GeneratedPluginRegistrant.register(with: self)
+    
+    // Configure push notifications
+    if #available(iOS 10.0, *) {
+      UNUserNotificationCenter.current().delegate = self
+      let authOptions: UNAuthorizationOptions = [.alert, .badge, .sound]
+      UNUserNotificationCenter.current().requestAuthorization(
+        options: authOptions,
+        completionHandler: { _, _ in }
+      )
+    } else {
+      let settings: UIUserNotificationSettings =
+        UIUserNotificationSettings(types: [.alert, .badge, .sound], categories: nil)
+      application.registerUserNotificationSettings(settings)
+    }
+    
+    application.registerForRemoteNotifications()
+    
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+}
+
+// MARK: - UNUserNotificationCenterDelegate
+@available(iOS 10, *)
+extension AppDelegate {
+  // Receive displayed notifications for iOS 10 devices.
+  override
+  func userNotificationCenter(_ center: UNUserNotificationCenter,
+                              willPresent notification: UNNotification,
+                              withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    let userInfo = notification.request.content.userInfo
+    
+    // Print message ID.
+    if let messageID = userInfo["gcm.message_id"] {
+      print("Message ID: \(messageID)")
+    }
+    
+    // Print full message.
+    print(userInfo)
+    
+    // Change this to your preferred presentation option
+    completionHandler([[.alert, .sound]])
+  }
+  
+  override
+  func userNotificationCenter(_ center: UNUserNotificationCenter,
+                              didReceive response: UNNotificationResponse,
+                              withCompletionHandler completionHandler: @escaping () -> Void) {
+    let userInfo = response.notification.request.content.userInfo
+    
+    // Print message ID.
+    if let messageID = userInfo["gcm.message_id"] {
+      print("Message ID: \(messageID)")
+    }
+    
+    // Print full message.
+    print(userInfo)
+    
+    completionHandler()
   }
 }

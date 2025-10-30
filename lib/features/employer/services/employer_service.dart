@@ -71,4 +71,16 @@ abstract class EmployerService {
     Map<String, dynamic>? location,
     bool clear,
   });
+
+  /// Fetch payment history for job postings
+  Future<List<JobPaymentRecord>> fetchJobPaymentHistory({
+    int? page,
+    int? limit,
+  });
+
+  /// Fetch feedback left by workers for the authenticated employer
+  Future<List<EmployerFeedback>> fetchEmployerFeedback({
+    int? page,
+    int? limit,
+  });
 }

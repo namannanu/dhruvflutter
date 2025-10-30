@@ -7,6 +7,7 @@ import 'package:talent/core/models/models.dart';
 import 'package:talent/core/services/business_access_context.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/core/widgets/access_tag.dart';
+import 'package:talent/features/employer/screens/employer_worker_profile_screen.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 
 class EmployeeHireApplicationScreen extends StatefulWidget {
@@ -371,6 +372,16 @@ class _EmployerApplicationCardState extends State<_EmployerApplicationCard> {
     }
   }
 
+  void _openWorkerProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EmployerWorkerProfileScreen(
+          application: widget.application,
+        ),
+      ),
+    );
+  }
+
   Future<void> _restoreToPending() async {
     if (_pendingAction != null ||
         widget.application.status == ApplicationStatus.pending) {
@@ -441,9 +452,9 @@ class _EmployerApplicationCardState extends State<_EmployerApplicationCard> {
       await appState.scheduleAttendanceForWorker(
         workerId: widget.application.workerId,
         jobId: widget.application.jobId,
-        startDate: result['scheduledStart'] as DateTime,
-        location: 'TBD', // Default location
-        hoursScheduled: 8.0, // Default hours
+        scheduledStart: result['scheduledStart'] as DateTime,
+        scheduledEnd: result['scheduledEnd'] as DateTime,
+        hourlyRate: result['hourlyRate'] as double,
         notes: result['notes'] as String?,
       );
 
@@ -666,6 +677,12 @@ class _EmployerApplicationCardState extends State<_EmployerApplicationCard> {
                       ),
                       label: const Text('Reject'),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: _pendingAction == null ? _openWorkerProfile : null,
+                      icon: const Icon(Icons.person_search_outlined),
+                      label: const Text('View profile'),
+                    ),
+
                     if (canRestore)
                       TextButton.icon(
                         onPressed:

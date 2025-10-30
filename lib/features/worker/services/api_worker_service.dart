@@ -1,10 +1,8 @@
 // ignore_for_file: unnecessary_type_check, avoid_print, unrelated_type_equality_checks
-
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/services/base/base_api_service.dart';
 import 'package:talent/core/services/cache/worker_cache_repository.dart';
@@ -30,8 +28,10 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
 
   @override
   Future<WorkerProfile> fetchWorkerProfile(String workerId) async {
-    final response = await client.get(
-      resolve(workerId == 'me' ? '/workers/me' : '/workers/$workerId'),
+    final endpoint = workerId == 'me' ? '/workers/me' : '/workers/$workerId';
+
+    final response = await get(
+      endpoint,
       headers: headers(authToken: _authToken),
     );
 
@@ -45,18 +45,42 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
   @override
   Future<WorkerProfile> updateWorkerProfile({
     required String workerId,
+    String? firstName,
+    String? lastName,
     String? bio,
     List<String>? skills,
     String? experience,
     List<String>? languages,
     String? phone,
+    List<Map<String, dynamic>>? availability,
+    bool? notificationsEnabled,
+    bool? emailNotificationsEnabled,
+    double? preferredRadiusMiles,
   }) async {
     final body = <String, dynamic>{};
+    if (firstName != null) body['firstName'] = firstName;
+    if (lastName != null) body['lastName'] = lastName;
     if (bio != null) body['bio'] = bio;
     if (skills != null) body['skills'] = skills;
     if (experience != null) body['experience'] = experience;
     if (languages != null) body['languages'] = languages;
     if (phone != null) body['phone'] = phone;
+    if (notificationsEnabled != null) {
+      body['notificationsEnabled'] = notificationsEnabled;
+    }
+    if (emailNotificationsEnabled != null) {
+      body['emailNotificationsEnabled'] = emailNotificationsEnabled;
+    }
+    if (preferredRadiusMiles != null) {
+      body['preferredRadiusMiles'] = preferredRadiusMiles;
+    }
+
+    if (availability != null) {
+      body['availability'] = availability
+          .map(_normalizeAvailabilityDay)
+          .whereType<Map<String, dynamic>>()
+          .toList();
+    }
 
     final response = await client.patch(
       resolveWithQuery('/workers/me'),
@@ -69,6 +93,97 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     final profile = WorkerProfile.fromJson(payload);
     await _cache?.writeProfile(profile);
     return profile;
+  }
+
+  @override
+  Future<List<EmploymentRecord>> fetchEmploymentHistory(
+    String workerId,
+  ) async {
+    final endpoint = workerId == 'me'
+        ? '/workers/me/employment/history'
+        : '/workers/$workerId/employment/history';
+
+    final response = await get(
+      endpoint,
+      headers: headers(authToken: _authToken),
+    );
+
+    final decoded = decodeJson(response);
+    final records = _listOrEmpty(
+      decoded['data'] ?? decoded['employmentHistory'],
+    );
+
+    return records
+        .whereType<Map>()
+        .map(
+          (entry) => EmploymentRecord.fromJson(
+            Map<String, dynamic>.from(entry),
+          ),
+        )
+        .toList();
+  }
+
+  Map<String, dynamic>? _normalizeAvailabilityDay(Map<String, dynamic> day) {
+    final dayName = day['day']?.toString();
+    if (dayName == null) {
+      return null;
+    }
+
+    final normalizedDay = dayName.toLowerCase();
+    const allowedDays = [
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+      'sunday',
+    ];
+    if (!allowedDays.contains(normalizedDay)) {
+      return null;
+    }
+
+    final isAvailableRaw =
+        day['isAvailable'] ?? day['available'] ?? day['active'];
+    final isAvailable = _coerceBool(isAvailableRaw);
+
+    final slotsRaw = day['timeSlots'];
+    final slots = <Map<String, String>>[];
+    if (slotsRaw is List) {
+      for (final slot in slotsRaw) {
+        if (slot is Map) {
+          final start = slot['startTime']?.toString();
+          final end = slot['endTime']?.toString();
+          if (_isValidTime(start) && _isValidTime(end)) {
+            slots.add({'startTime': start!, 'endTime': end!});
+          }
+        }
+      }
+    }
+
+    return <String, dynamic>{
+      'day': normalizedDay,
+      'isAvailable': isAvailable,
+      'timeSlots': slots,
+    };
+  }
+
+  bool _coerceBool(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.toLowerCase();
+      return normalized == 'true' ||
+          normalized == '1' ||
+          normalized == 'yes' ||
+          normalized == 'available';
+    }
+    return false;
+  }
+
+  bool _isValidTime(String? value) {
+    if (value == null) return false;
+    return RegExp(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$').hasMatch(value);
   }
 
   Map<String, dynamic> _extractProfilePayload(Map<String, dynamic> json) {
@@ -118,6 +233,20 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     String status = 'active',
     bool fallbackToAll = true,
   }) async {
+    // Enhanced debug logging
+    print('🔍 DEBUG: fetchWorkerJobs called with:');
+    print('   - workerId: $workerId');
+    print('   - status: $status');
+    print('   - fallbackToAll: $fallbackToAll');
+    print('   - authToken available: ${_authToken != null}');
+    print('   - currentUserBusinessId: $_currentUserBusinessId');
+
+    if (_authToken == null) {
+      print('❌ ERROR: No auth token available - worker cannot fetch jobs');
+      throw ApiWorkConnectException(
+          401, 'Authentication required: No auth token available');
+    }
+
     final query = _buildWorkerJobQuery(status);
     final filterLabel = query == null ? 'all' : 'status=$status';
     List<dynamic> data = const [];
@@ -128,34 +257,39 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         debugLabel: filterLabel,
       );
     } on ApiWorkConnectException catch (error) {
-      print('DEBUG: API error fetching jobs ($filterLabel): $error');
+      print('❌ DEBUG: API error fetching jobs ($filterLabel): $error');
+      print('   - Status Code: ${error.statusCode}');
+      print('   - Message: ${error.message}');
+
       if (fallbackToAll && query != null) {
+        print('🔄 DEBUG: Attempting fallback to fetch all jobs...');
         try {
           data = await _fetchWorkerJobsPayload(
             query: null,
             debugLabel: 'all (fallback)',
           );
         } on ApiWorkConnectException catch (fallbackError) {
-          print('DEBUG: Fallback jobs API error: $fallbackError');
+          print('❌ DEBUG: Fallback jobs API error: $fallbackError');
           if (_isNotFoundOrUnauthorized(fallbackError.statusCode)) {
+            print('🔍 DEBUG: Returning empty list due to auth/not found error');
             return const <JobPosting>[];
           }
           rethrow;
         } catch (fallbackError) {
           print(
-              'DEBUG: Unexpected error during fallback fetch: $fallbackError');
+              '❌ DEBUG: Unexpected error during fallback fetch: $fallbackError');
           rethrow;
         }
       } else {
         if (_isNotFoundOrUnauthorized(error.statusCode)) {
           print(
-              'DEBUG: Jobs API returned ${error.statusCode}, returning empty list');
+              '🔍 DEBUG: Jobs API returned ${error.statusCode}, returning empty list');
           return const <JobPosting>[];
         }
         rethrow;
       }
     } catch (error) {
-      print('DEBUG: Unexpected error fetching jobs ($filterLabel): $error');
+      print('❌ DEBUG: Unexpected error fetching jobs ($filterLabel): $error');
       rethrow;
     }
 
@@ -184,10 +318,19 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       return const <JobPosting>[];
     }
 
-    final jobs = data.map(_parseJobPosting).toList();
+    final parsedJobs = data.map(_parseJobPosting).toList();
+    final publishedJobs = parsedJobs
+        .where((job) => job.isPublished || job.publishStatus == 'published')
+        .toList();
+
     print(
-        'DEBUG: Successfully parsed ${jobs.length} jobs (filter: $filterLabel)');
-    return jobs;
+        'DEBUG: Successfully parsed ${parsedJobs.length} jobs (filter: $filterLabel)');
+    if (publishedJobs.length != parsedJobs.length) {
+      print(
+          'DEBUG: Filtered out ${parsedJobs.length - publishedJobs.length} unpublished jobs for worker view');
+    }
+
+    return publishedJobs;
   }
 
   /// Fetch a specific job by ID (useful for getting employer info from applications)
@@ -286,6 +429,51 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       print('❌ Unexpected error fetching applications: $e');
       rethrow;
     }
+  }
+
+  @override
+  Future<EmployerFeedback> submitEmployerFeedback({
+    required String workerId,
+    required String employerId,
+    required int rating,
+    String? comment,
+    String? jobId,
+  }) async {
+    final _ = workerId;
+    final payload = <String, dynamic>{
+      'employerId': employerId,
+      'rating': rating,
+      if (comment != null && comment.trim().isNotEmpty)
+        'comment': comment.trim(),
+      if (jobId != null && jobId.isNotEmpty) 'jobId': jobId,
+    };
+
+    final response = await client.post(
+      resolve('/feedback'),
+      headers: headers(authToken: _authToken),
+      body: jsonEncode(payload),
+    );
+
+    final decoded = decodeJson(response);
+    final data = _mapOrNull(decoded['data']) ?? decoded;
+    return EmployerFeedback.fromJson(data);
+  }
+
+  @override
+  Future<List<EmployerFeedback>> fetchWorkerFeedback(String workerId) async {
+    final _ = workerId;
+    final response = await client.get(
+      resolve('/feedback/worker'),
+      headers: headers(authToken: _authToken),
+    );
+
+    final decoded = decodeJson(response);
+    final data = _listOrEmpty(decoded['data']);
+    return data
+        .whereType<Map>()
+        .map((entry) =>
+            EmployerFeedback.fromJson(Map<String, dynamic>.from(entry)))
+        .toList();
   }
 
   @override
@@ -766,24 +954,28 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     required String debugLabel,
   }) async {
     final effectiveQuery = query == null || query.isEmpty ? null : query;
-    final url = resolveWithQuery(
-      '/jobs',
-      query: effectiveQuery,
-    );
+    final endpoint = '/jobs';
 
-    final requestHeaders = headers(authToken: _authToken);
-    print('DEBUG: Worker fetching jobs ($debugLabel) from URL: $url');
-    print('DEBUG: Request headers: $requestHeaders');
+    print(
+        '🔍 DEBUG: Worker fetching jobs ($debugLabel) with query: $effectiveQuery');
+    print('🔍 DEBUG: Auth token available: ${_authToken != null}');
+    print('🔍 DEBUG: Auth token length: ${_authToken?.length ?? 0}');
 
-    final response = await client.get(
-      url,
-      headers: requestHeaders,
+    final response = await get(
+      resolveWithQuery(endpoint, query: effectiveQuery),
+      headers: headers(authToken: _authToken),
     );
 
     print(
-        'DEBUG: Worker jobs API response status [$debugLabel]: ${response.statusCode}');
-    print(
-        'DEBUG: Worker jobs API response body [$debugLabel]: ${response.body}');
+        '📊 DEBUG: Worker jobs API response status [$debugLabel]: ${response.statusCode}');
+
+    if (response.statusCode != 200) {
+      print('❌ DEBUG: Non-200 response [$debugLabel]: ${response.body}');
+    } else {
+      print('✅ DEBUG: Successful API response [$debugLabel]');
+      print(
+          '🔍 DEBUG: Response body preview [$debugLabel]: ${response.body.length > 200 ? response.body.substring(0, 200) + '...' : response.body}');
+    }
 
     final decoded = decodeJson(response);
     final data = _listOrEmpty(decoded['data']);
@@ -791,12 +983,12 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     if (data.isEmpty && decoded.containsKey('results')) {
       final results = decoded['results'];
       print(
-          'DEBUG: API returned $results results but data array is empty [$debugLabel]');
+          '⚠️ DEBUG: API returned $results results but data array is empty [$debugLabel]');
     }
 
-    print('DEBUG: Parsed job data count [$debugLabel]: ${data.length}');
+    print('📈 DEBUG: Parsed job data count [$debugLabel]: ${data.length}');
     print(
-        'DEBUG: Full API response structure [$debugLabel]: ${decoded.keys.toList()}');
+        '🗂️ DEBUG: Full API response structure [$debugLabel]: ${decoded.keys.toList()}');
 
     return data;
   }
@@ -814,6 +1006,20 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       return value;
     }
     return null;
+  }
+
+  Map<String, dynamic> _buildLocationPayload(Location location) {
+    return {
+      'latitude': location.latitude,
+      'longitude': location.longitude,
+      if (location.accuracy != null) 'accuracy': location.accuracy,
+      if (location.altitude != null) 'altitude': location.altitude,
+      if (location.heading != null) 'heading': location.heading,
+      if (location.speed != null) 'speed': location.speed,
+      if (location.address != null) 'address': location.address,
+      if (location.timestamp != null)
+        'timestamp': location.timestamp!.toIso8601String(),
+    };
   }
 
   List<dynamic> _listOrEmpty(dynamic value) {
@@ -856,93 +1062,132 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     final json = _mapOrNull(value) ?? const <String, dynamic>{};
     final id = _string(json['id']) ?? _string(json['_id']) ?? '';
 
-    // Debug logging to see raw job data
-    print('DEBUG: Parsing job with ID: $id');
-    print('DEBUG: Raw employer field: ${json['employer']}');
-    print('DEBUG: Raw employerId field: ${json['employerId']}');
+    try {
+      // Debug logging to see raw job data
+      print('DEBUG: Parsing job with ID: $id');
 
-    final title = _string(json['title']) ?? 'Job';
-    final description = _string(json['description']) ?? '';
+      final title = _string(json['title']) ?? 'Job';
+      final description = _string(json['description']) ?? '';
 
-    // Enhanced employer ID parsing - check multiple possible formats
-    String employerId = '';
-    if (json['employerId'] != null) {
-      employerId = _string(json['employerId']) ?? '';
-    } else if (json['employer'] != null) {
-      final employer = json['employer'];
-      if (employer is String) {
-        employerId = employer;
-      } else if (employer is Map<String, dynamic>) {
-        // If employer is populated, get the ID
-        employerId = _string(employer['id']) ?? _string(employer['_id']) ?? '';
+      // Enhanced employer ID parsing - check multiple possible formats
+      String employerId = '';
+      if (json['employerId'] != null) {
+        employerId = _string(json['employerId']) ?? '';
+      } else if (json['employer'] != null) {
+        final employer = json['employer'];
+        if (employer is String) {
+          employerId = employer;
+        } else if (employer is Map<String, dynamic>) {
+          // If employer is populated, get the ID
+          employerId =
+              _string(employer['id']) ?? _string(employer['_id']) ?? '';
+        }
       }
-    }
 
-    print('DEBUG: Parsed employer ID: $employerId');
-
-    // Enhanced business ID parsing
-    String businessId = '';
-    if (json['businessId'] != null) {
-      businessId = _string(json['businessId']) ?? '';
-    } else if (json['business'] != null) {
-      final business = json['business'];
-      if (business is String) {
-        businessId = business;
-      } else if (business is Map<String, dynamic>) {
-        businessId = _string(business['id']) ?? _string(business['_id']) ?? '';
+      // Enhanced business ID parsing
+      String businessId = '';
+      if (json['businessId'] != null) {
+        businessId = _string(json['businessId']) ?? '';
+      } else if (json['business'] != null) {
+        final business = json['business'];
+        if (business is String) {
+          businessId = business;
+        } else if (business is Map<String, dynamic>) {
+          businessId =
+              _string(business['id']) ?? _string(business['_id']) ?? '';
+        }
       }
-    }
-    final hourlyRate = double.tryParse(_string(json['hourlyRate']) ?? '') ?? 0;
-    final overtimeRate = double.tryParse(_string(json['overtimeRate']) ?? '') ??
-        (hourlyRate * 1.5);
-    final urgency = _string(json['urgency']) ?? 'medium';
-    final tags = json['tags'] is List
-        ? (json['tags'] as List).map((t) => t.toString()).toList()
-        : <String>[];
-    final workDays = json['workDays'] is List
-        ? (json['workDays'] as List).map((d) => d.toString()).toList()
-        : <String>[];
-    final isVerificationRequired =
-        _string(json['verificationRequired'])?.toLowerCase() == 'true';
-    final scheduleStart =
-        DateTime.tryParse(_string(json['startDate']) ?? '') ?? DateTime.now();
-    final scheduleEnd = DateTime.tryParse(_string(json['endDate']) ?? '') ??
-        scheduleStart.add(const Duration(hours: 4));
-    final status = _parseJobStatus(_string(json['status']));
-    final postedAt =
-        DateTime.tryParse(_string(json['createdAt']) ?? '') ?? DateTime.now();
-    final distanceMiles =
-        double.tryParse(_string(json['distanceMiles']) ?? '') ?? 0;
-    final hasApplied = _string(json['hasApplied'])?.toLowerCase() == 'true';
-    final premiumRequired =
-        _string(json['premiumRequired'])?.toLowerCase() == 'true';
-    final locationSummary = _string(json['locationSummary']);
-    final applicantsCount =
-        int.tryParse(_string(json['applicantsCount']) ?? '') ?? 0;
 
-    return JobPosting(
-      id: id.isEmpty ? title : id,
-      title: title,
-      description: description,
-      employerId: employerId,
-      businessId: businessId,
-      hourlyRate: hourlyRate,
-      scheduleStart: scheduleStart,
-      scheduleEnd: scheduleEnd,
-      recurrence: 'one-time',
-      overtimeRate: overtimeRate,
-      urgency: urgency,
-      tags: tags,
-      workDays: workDays,
-      isVerificationRequired: isVerificationRequired,
-      status: status,
-      postedAt: postedAt,
-      distanceMiles: distanceMiles,
-      hasApplied: hasApplied,
-      premiumRequired: premiumRequired,
-      locationSummary: locationSummary,
-      applicantsCount: applicantsCount,
-    );
+      final hourlyRate =
+          double.tryParse(_string(json['hourlyRate']) ?? '') ?? 0;
+      final overtimeRate =
+          double.tryParse(_string(json['overtimeRate']) ?? '') ??
+              (hourlyRate * 1.5);
+      final urgency = _string(json['urgency']) ?? 'medium';
+      final tags = json['tags'] is List
+          ? (json['tags'] as List).map((t) => t.toString()).toList()
+          : <String>[];
+      final workDays = json['workDays'] is List
+          ? (json['workDays'] as List).map((d) => d.toString()).toList()
+          : <String>[];
+      final isVerificationRequired =
+          _string(json['verificationRequired'])?.toLowerCase() == 'true';
+      final scheduleStart =
+          DateTime.tryParse(_string(json['startDate']) ?? '') ?? DateTime.now();
+      final scheduleEnd = DateTime.tryParse(_string(json['endDate']) ?? '') ??
+          scheduleStart.add(const Duration(hours: 4));
+      final status = _parseJobStatus(_string(json['status']));
+      final postedAt =
+          DateTime.tryParse(_string(json['createdAt']) ?? '') ?? DateTime.now();
+      final distanceMiles =
+          double.tryParse(_string(json['distanceMiles']) ?? '') ?? 0;
+      final hasApplied = _string(json['hasApplied'])?.toLowerCase() == 'true';
+      final premiumRequired =
+          _string(json['premiumRequired'])?.toLowerCase() == 'true';
+      final locationSummary = _string(json['locationSummary']);
+
+      // Safe parsing of applicantsCount with detailed error handling
+      int applicantsCount = 0;
+      try {
+        final applicantsCountRaw = json['applicantsCount'];
+        applicantsCount = int.tryParse(_string(applicantsCountRaw) ?? '') ?? 0;
+      } catch (e) {
+        applicantsCount = 0;
+      }
+
+      // Parse business-related fields with safe handling
+      final businessName = _string(json['businessName']) ??
+          _string(json['businessDetails']?['name']) ??
+          '';
+      final businessLogoUrl = _string(json['businessLogoUrl']) ??
+          _string(json['businessDetails']?['logoUrl']);
+      final businessLogoOriginalUrl =
+          _string(json['businessLogoOriginalUrl']) ??
+              _string(json['businessDetails']?['logo']?['original']?['url']);
+      final businessLogoSquareUrl = _string(json['businessLogoSquareUrl']) ??
+          _string(json['businessDetails']?['logo']?['square']?['url']);
+
+      // Parse publish status fields
+      final isPublished = json['isPublished'] as bool? ??
+          true; // Default to true for published jobs
+      final publishStatus =
+          _string(json['publishStatus']) ?? 'published'; // Default to published
+
+      return JobPosting(
+        id: id.isEmpty ? title : id,
+        title: title,
+        description: description,
+        employerId: employerId,
+        businessId: businessId,
+        hourlyRate: hourlyRate,
+        scheduleStart: scheduleStart,
+        scheduleEnd: scheduleEnd,
+        recurrence: 'one-time',
+        overtimeRate: overtimeRate,
+        urgency: urgency,
+        tags: tags,
+        workDays: workDays,
+        isVerificationRequired: isVerificationRequired,
+        status: status,
+        postedAt: postedAt,
+        distanceMiles: distanceMiles,
+        hasApplied: hasApplied,
+        premiumRequired: premiumRequired,
+        locationSummary: locationSummary,
+        applicantsCount: applicantsCount,
+        businessName: businessName,
+        businessLogoUrl: businessLogoUrl,
+        businessLogoOriginalUrl: businessLogoOriginalUrl,
+        businessLogoSquareUrl: businessLogoSquareUrl,
+        isPublished: isPublished,
+        publishStatus: publishStatus,
+      );
+    } catch (e, stackTrace) {
+      print('ERROR: Failed to parse job posting: $e');
+      print('ERROR: Stack trace: $stackTrace');
+      print('ERROR: Raw JSON: $json');
+      rethrow;
+    }
   }
 
   JobStatus _parseJobStatus(String? value) {
@@ -985,12 +1230,17 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
 
     // Debug logging for application parsing
     print('DEBUG: Parsing application with ID: ${json['_id'] ?? json['id']}');
-    print('DEBUG: Raw application JSON: $json');
+    print('DEBUG: Raw job field: ${json['job']}');
+    print('DEBUG: Raw jobId field: ${json['jobId']}');
 
     try {
-      return Application.fromJson(json);
+      final app = Application.fromJson(json);
+      print(
+          'DEBUG: Successfully parsed using Application.fromJson, jobId: ${app.jobId}');
+      return app;
     } catch (error) {
-      print('DEBUG: Error parsing application: $error');
+      print(
+          'DEBUG: Error parsing application with Application.fromJson: $error');
       print('DEBUG: Falling back to manual parsing');
 
       final workerMap = _mapOrNull(json['worker']);
@@ -999,7 +1249,39 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       final id = _string(json['_id']) ?? _string(json['id']) ?? '';
       final workerId =
           _string(json['worker']) ?? _string(json['workerId']) ?? '';
-      final jobId = _string(json['job']) ?? _string(json['jobId']) ?? '';
+
+      // Enhanced job ID parsing - handle ObjectId references and MongoDB formats
+      String jobId = '';
+      final jobField = json['job'];
+      final jobIdField = json['jobId'];
+
+      // Try to extract job ID from various formats
+      if (jobField != null) {
+        if (jobField is String) {
+          jobId = jobField;
+        } else if (jobField is Map<String, dynamic>) {
+          // Handle ObjectId reference format: {"$oid": "..."}
+          jobId = _string(jobField['\$oid']) ??
+              _string(jobField['_id']) ??
+              _string(jobField['id']) ??
+              '';
+        }
+      }
+
+      if (jobId.isEmpty && jobIdField != null) {
+        if (jobIdField is String) {
+          jobId = jobIdField;
+        } else if (jobIdField is Map<String, dynamic>) {
+          // Handle ObjectId reference format: {"$oid": "..."}
+          jobId = _string(jobIdField['\$oid']) ??
+              _string(jobIdField['_id']) ??
+              _string(jobIdField['id']) ??
+              '';
+        }
+      }
+
+      print('DEBUG: Manual parsing - final job ID: $jobId');
+
       final statusString = _string(json['status']) ?? 'pending';
       final message = _string(json['message']) ?? _string(json['note']);
       final createdAt =
@@ -1499,32 +1781,62 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
   }
 
   @override
-  Future<AttendanceRecord> clockIn(String recordId) async {
+  Future<AttendanceRecord> clockIn(
+    String recordId, {
+    required Location location,
+  }) async {
+    final payload = _buildLocationPayload(location);
+    if (kDebugMode) {
+      print(
+        '🕒 [WorkerClockIn] POST /attendance/$recordId/clock-in payload: ${jsonEncode(payload)}',
+      );
+    }
     final response = await client.post(
       resolve('/attendance/$recordId/clock-in'),
       headers: headers(authToken: _authToken),
+      body: jsonEncode(payload),
     );
+    if (kDebugMode) {
+      print(
+        '🕒 [WorkerClockIn] response ${response.statusCode}: ${response.body}',
+      );
+    }
     final json = decodeJson(response);
-    final payload =
+    final responsePayload =
         _mapOrNull(json['attendance']) ?? _mapOrNull(json['data']) ?? json;
-    return _parseAttendanceRecord(payload);
+    return _parseAttendanceRecord(responsePayload);
   }
 
   @override
-  Future<AttendanceRecord> clockOut(String recordId,
-      {double? hourlyRate}) async {
-    final body = <String, dynamic>{};
-    if (hourlyRate != null) body['hourlyRate'] = hourlyRate;
+  Future<AttendanceRecord> clockOut(
+    String recordId, {
+    required Location location,
+    double? hourlyRate,
+  }) async {
+    final body = _buildLocationPayload(location);
+    if (hourlyRate != null) {
+      body['hourlyRate'] = hourlyRate;
+    }
+    if (kDebugMode) {
+      print(
+        '🕒 [WorkerClockOut] POST /attendance/$recordId/clock-out payload: ${jsonEncode(body)}',
+      );
+    }
 
     final response = await client.post(
       resolve('/attendance/$recordId/clock-out'),
       headers: headers(authToken: _authToken),
       body: jsonEncode(body),
     );
+    if (kDebugMode) {
+      print(
+        '🕒 [WorkerClockOut] response ${response.statusCode}: ${response.body}',
+      );
+    }
     final json = decodeJson(response);
-    final payload =
+    final responsePayload =
         _mapOrNull(json['attendance']) ?? _mapOrNull(json['data']) ?? json;
-    return _parseAttendanceRecord(payload);
+    return _parseAttendanceRecord(responsePayload);
   }
 
   @override
@@ -1538,9 +1850,9 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       body: jsonEncode(body),
     );
     final json = decodeJson(response);
-    final payload =
+    final responsePayload =
         _mapOrNull(json['attendance']) ?? _mapOrNull(json['data']) ?? json;
-    return _parseAttendanceRecord(payload);
+    return _parseAttendanceRecord(responsePayload);
   }
 
   @override

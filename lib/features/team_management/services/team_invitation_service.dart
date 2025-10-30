@@ -104,7 +104,10 @@ class TeamInvitationService {
   }
 
   /// Get the list of team members
-  Future<List<Map<String, dynamic>>> getTeamMembers({String? authToken}) async {
+  Future<List<Map<String, dynamic>>> getTeamMembers({
+    String? authToken,
+    String? businessId,
+  }) async {
     try {
       print('📋 FETCHING TEAM MEMBERS');
 
@@ -133,17 +136,33 @@ class TeamInvitationService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as Map<String, dynamic>;
 
+        List<Map<String, dynamic>> filterByBusiness(
+            List<dynamic> source) {
+          final list = source.cast<Map<String, dynamic>>();
+          if (businessId == null || businessId.isEmpty) {
+            return list;
+          }
+          return list
+              .where((member) {
+                final context = member['businessContext'];
+                if (context is Map && context['businessId'] != null) {
+                  return context['businessId'].toString() == businessId;
+                }
+                return false;
+              })
+              .toList();
+        }
+
         // Check if data is already a list or contains a list
         if (data['data'] is List) {
-          final teamList = data['data'] as List<dynamic>;
-          return teamList.cast<Map<String, dynamic>>();
-        } else if (data['data'] is Map && data['data']['teamMembers'] is List) {
+          return filterByBusiness(data['data'] as List<dynamic>);
+        } else if (data['data'] is Map &&
+            data['data']['teamMembers'] is List) {
           // Handle nested structure
-          final teamList = data['data']['teamMembers'] as List<dynamic>;
-          return teamList.cast<Map<String, dynamic>>();
+          return filterByBusiness(data['data']['teamMembers'] as List<dynamic>);
         } else if (data is List) {
           // Handle direct list response - this case shouldn't happen since we decoded as Map
-          return (data as List).cast<Map<String, dynamic>>();
+          return filterByBusiness(data as List<dynamic>);
         } else {
           print('⚠️ Unexpected data structure: ${data.runtimeType}');
           print('📄 Data content: $data');

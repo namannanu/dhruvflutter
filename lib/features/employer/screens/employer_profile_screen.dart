@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/features/employer/screens/employer_billing_screen.dart';
 import 'package:talent/features/shared/screens/messaging_screen.dart';
-
-import '../../../features/team_management/screens/team_management_page.dart';
+import 'package:talent/features/team_management/screens/team_api_test_page copy.dart';
 
 class EmployerProfileScreen extends StatefulWidget {
   const EmployerProfileScreen({super.key, this.onBack});
@@ -27,6 +28,10 @@ class _EmployerProfileScreenState extends State<EmployerProfileScreen> {
   void initState() {
     super.initState();
     _initializeControllers();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<AppState>().loadEmployerFeedback(forceRefresh: true);
+    });
   }
 
   @override
@@ -110,12 +115,10 @@ class _EmployerProfileScreenState extends State<EmployerProfileScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const TeamManagementPage(),
+        builder: (context) => const TeamApiTestPage(),
       ),
     );
   }
-
- 
 
   void _navigateToBusinessManager() {
     // Implementation needed: Implement business manager navigation
@@ -143,6 +146,7 @@ class _EmployerProfileScreenState extends State<EmployerProfileScreen> {
           body: RefreshIndicator(
             onRefresh: () async {
               await appState.refreshActiveRole();
+              await appState.loadEmployerFeedback(forceRefresh: true);
             },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -165,7 +169,7 @@ class _EmployerProfileScreenState extends State<EmployerProfileScreen> {
                   const SizedBox(height: 16),
                   _buildHiringActivity(context, profile),
                   const SizedBox(height: 16),
-                  _buildWorkerReviews(context),
+                  _buildWorkerReviews(context, appState),
                   const SizedBox(height: 16),
                   _buildTeamManagement(context),
                   const SizedBox(height: 16),
@@ -907,24 +911,44 @@ class _EmployerProfileScreenState extends State<EmployerProfileScreen> {
     );
   }
 
-  Widget _buildWorkerReviews(BuildContext context) {
-    final reviews = [
-      {
-        'id': '1',
-        'worker': 'Miguel Johnson',
-        'rating': 5,
-        'comment':
-            'Great employer! Always pays on time and treats workers with respect.',
-        'date': '2 weeks ago'
-      },
-      {
-        'id': '2',
-        'worker': 'Sarah Martinez',
-        'rating': 4,
-        'comment': 'Good work environment, clear instructions.',
-        'date': '1 month ago'
-      }
-    ];
+  Widget _buildWorkerReviews(BuildContext context, AppState appState) {
+    final feedback = appState.employerFeedback;
+    final isLoading = appState.isLoadingEmployerFeedback;
+
+    if (isLoading && feedback.isEmpty) {
+      return Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: const Padding(
+          padding: EdgeInsets.all(24),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    if (feedback.isEmpty) {
+      return Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: const Padding(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Reviews from Workers',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'Workers you hire can share feedback here. Deliver great experiences to earn positive reviews.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Card(
       elevation: 2,
@@ -939,57 +963,71 @@ class _EmployerProfileScreenState extends State<EmployerProfileScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
-            ...reviews.map((review) => Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            review['worker'] as String,
-                            style: const TextStyle(fontWeight: FontWeight.w500),
+            ...feedback.map((entry) {
+              final workerName = entry.workerName ?? 'Worker';
+              final timestamp =
+                  DateFormat.yMMMd().format(entry.createdAt.toLocal());
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            workerName,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
-                          Row(
-                            children: List.generate(5, (index) {
-                              return Icon(
-                                Icons.star,
-                                size: 16,
-                                color: index < (review['rating'] as int)
-                                    ? Colors.amber
-                                    : Colors.grey[300],
-                              );
-                            }),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        review['comment'] as String,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        review['date'] as String,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[500],
-                        ),
-                      ),
-                      if (review != reviews.last) ...[
-                        const SizedBox(height: 16),
-                        Divider(color: Colors.grey[200]),
+                        _buildRatingStars(entry.rating),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      entry.comment.isEmpty
+                          ? 'No comment provided'
+                          : entry.comment,
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      timestamp,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
+                    if (entry != feedback.last) ...[
+                      const SizedBox(height: 16),
+                      Divider(color: Colors.grey[200]),
                     ],
-                  ),
-                )),
+                  ],
+                ),
+              );
+            }),
+            if (isLoading) const Center(child: CircularProgressIndicator()),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildRatingStars(double rating) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (index) {
+        final value = index + 1;
+        final isFull = rating >= value;
+        final isHalf = !isFull && rating >= value - 0.5;
+        return Icon(
+          isFull
+              ? Icons.star
+              : isHalf
+                  ? Icons.star_half
+                  : Icons.star_border,
+          color: Colors.amber,
+          size: 18,
+        );
+      }),
     );
   }
 
@@ -999,48 +1037,44 @@ class _EmployerProfileScreenState extends State<EmployerProfileScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.group, color: Colors.grey),
-                SizedBox(width: 8),
-                Text(
-                  'Team Management',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Manage your team members, assign roles and permissions across your business locations.',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 14,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(
+            children: [
+              Icon(Icons.group, color: Colors.grey),
+              SizedBox(width: 8),
+              Text(
+                'Team Management',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Manage your team members, assign roles and permissions across your business locations.',
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 14,
             ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _navigateToTeamManagement,
-                icon: const Icon(Icons.people, color: Colors.white),
-                label: const Text(
-                  'Manage Team',
-                  style: TextStyle(color: Colors.white),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue[600],
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _navigateToTeamManagement,
+              icon: const Icon(Icons.people, color: Colors.white),
+              label: const Text(
+                'Manage Team',
+                style: TextStyle(color: Colors.white),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue[600],
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ]),
       ),
     );
   }
@@ -1064,8 +1098,10 @@ class _EmployerProfileScreenState extends State<EmployerProfileScreen> {
               'Manage payment methods and billing',
               Colors.grey[50]!,
               () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Opening billing settings...')),
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const EmployerBillingScreen(),
+                  ),
                 );
               },
             ),

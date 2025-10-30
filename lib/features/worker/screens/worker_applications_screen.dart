@@ -11,6 +11,7 @@ import 'package:talent/features/shared/screens/messaging_screen.dart';
 import 'package:talent/features/shared/services/conversation_api_service.dart';
 import 'package:talent/core/widgets/access_tag.dart';
 import 'package:talent/core/services/business_access_context.dart';
+import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 
 class WorkerApplicationsScreen extends StatelessWidget {
   const WorkerApplicationsScreen({super.key});
@@ -132,6 +133,48 @@ class _ApplicationCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
 
+                // Job info row with business logo and job title
+                if (application.job != null) ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      BusinessLogoAvatar(
+                        logoUrl: application.job!.businessLogoSquareUrl ??
+                            application.job!.businessLogoUrl ??
+                            application.job!.businessLogoOriginalUrl,
+                        name: application.job!.businessName.isNotEmpty
+                            ? application.job!.businessName
+                            : application.job!.title,
+                        size: 40,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              application.job!.title,
+                              style: theme.textTheme.titleMedium,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (application.job!.businessName.isNotEmpty)
+                              Text(
+                                application.job!.businessName,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.textTheme.bodySmall?.color,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
                 // Submitted date
                 Row(
                   children: [
@@ -148,21 +191,41 @@ class _ApplicationCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
 
-                // Job id
+                // Job details
                 Row(
                   children: [
                     const Icon(Icons.work_outline, size: 16),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Job ID: ${application.jobId}',
+                        application.job != null
+                            ? 'Job: ${application.job!.title}'
+                            : 'Job ID: ${application.jobId}',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
+
+                // Additional job info (hourly rate)
+                if (application.job != null) ...[
+                  Row(
+                    children: [
+                      const Icon(Icons.attach_money, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '\$${application.job!.hourlyRate.toStringAsFixed(2)}/hour',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
 
                 // Note
                 Text(

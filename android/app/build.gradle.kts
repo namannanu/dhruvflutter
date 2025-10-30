@@ -1,9 +1,25 @@
+import java.util.Base64
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun String?.takeIfNotBlank(): String? = this?.takeIf { it.isNotBlank() }
+
+val razorpayKeyId: String? =
+    System.getenv("RAZORPAY_KEY_ID").takeIfNotBlank()
+        ?: localProperties.getProperty("razorpay.key_id").takeIfNotBlank()
 
 android {
     namespace = "com.mrmad.dhruv.talent"
@@ -49,4 +65,24 @@ android {
 
 flutter {
     source = "../.."
+}
+
+if (!razorpayKeyId.isNullOrBlank()) {
+    val encodedDefine =
+        Base64.getEncoder().encodeToString("RAZORPAY_KEY_ID=$razorpayKeyId".toByteArray())
+    val existingDefines =
+        (project.findProperty("dart-defines") as String?)
+            ?.split(",")
+            ?.filter { it.isNotBlank() }
+            ?.toMutableList()
+            ?: mutableListOf()
+    if (!existingDefines.contains(encodedDefine)) {
+        existingDefines.add(encodedDefine)
+    }
+    project.extensions.extraProperties["dart-defines"] = existingDefines.joinToString(",")
+}
+
+dependencies {
+    // Razorpay SDK references these annotations when R8 is enabled.
+    implementation("com.guardsquare:proguard-annotations:7.4.1")
 }

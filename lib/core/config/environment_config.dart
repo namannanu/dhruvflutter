@@ -9,6 +9,12 @@ class EnvironmentConfig {
       String.fromEnvironment('GOOGLE_PLACES_APIKEY', defaultValue: '');
   static const String _mapsApiKey =
       String.fromEnvironment('GOOGLE_MAPS_API_KEY', defaultValue: '');
+  static const String _razorpayKeyPrimary =
+      String.fromEnvironment('RAZORPAY_KEY_ID', defaultValue: '');
+  static const String _razorpayKeyLegacy =
+      String.fromEnvironment('RAZORPAY_KEY', defaultValue: '');
+  static const String _embeddedRazorpayTestKey =
+      'rzp_test_ROzpR9FCBfPSds'; // Test key for local development
 
   // Google Places API key from Google Cloud Console (Working and tested!)
   static const String _embeddedPlacesKey =
@@ -32,5 +38,19 @@ class EnvironmentConfig {
     print(
         '🔑 Using embedded Places key: ${_embeddedPlacesKey.substring(0, 10)}...');
     return _embeddedPlacesKey;
+  }
+
+  static String? get razorpayKeyId {
+    if (_razorpayKeyPrimary.isNotEmpty) {
+      return _razorpayKeyPrimary;
+    }
+    if (_razorpayKeyLegacy.isNotEmpty) {
+      return _razorpayKeyLegacy;
+    }
+    if (_embeddedRazorpayTestKey.isNotEmpty) {
+      print('💳 Using embedded Razorpay test key');
+      return _embeddedRazorpayTestKey;
+    }
+    return null;
   }
 }

@@ -246,6 +246,14 @@ class _NotificationPreferencesScreenState
           'icon': Icons.schedule,
           'color': Colors.purple,
         };
+      case NotificationType.attendance:
+        return {
+          'title': 'Attendance',
+          'description':
+              'Clock-in/out confirmations, late arrivals, and attendance tracking',
+          'icon': Icons.access_time,
+          'color': Colors.indigo,
+        };
       case NotificationType.message:
         return {
           'title': 'Messages',

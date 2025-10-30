@@ -1,17 +1,22 @@
 // ignore_for_file: directives_ordering, avoid_print
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:talent/core/models/jwt_payload.dart';
 import 'package:talent/core/models/user.dart';
 import 'package:talent/features/auth/services/api_auth_service.dart';
 import 'package:talent/features/business/services/api_business_service.dart';
 import 'package:talent/features/employer/services/api_employer_service.dart';
+import 'package:talent/features/employer/services/attendance_api_service.dart';
 import 'package:talent/features/job/services/api_job_service.dart';
 import 'package:talent/features/messaging/services/api_messaging_service.dart';
 import 'package:talent/features/shift/services/api_shift_service.dart';
 import 'package:talent/features/worker/services/api_worker_service.dart';
+import 'package:talent/services/auth_token_manager.dart';
 
 import '../cache/worker_cache_repository.dart';
+import 'package:talent/features/worker/services/api_worker_preferences_service.dart';
 
 class ServiceLocator {
   // 🔑 Singleton instance
@@ -58,13 +63,23 @@ class ServiceLocator {
   final WorkerCacheRepository workerCache;
   String? _cachedBusinessId;
 
-  late final ApiAuthService auth;
-  late final ApiWorkerService worker;
-  late final ApiEmployerService employer;
-  late final ApiBusinessService business;
-  late final ApiJobService job;
-  late final ApiShiftService shift;
-  late final ApiMessagingService messaging;
+  // Expose configuration
+  String get apiUrl => _baseUrl;
+
+  // Expose auth token for services
+  Future<String?> getAuthToken() async {
+    return _authToken;
+  }
+
+  late ApiAuthService auth;
+  late ApiWorkerService worker;
+  late ApiEmployerService employer;
+  late ApiBusinessService business;
+  late ApiJobService job;
+  late ApiShiftService shift;
+  late ApiMessagingService messaging;
+  late AttendanceApiService attendance;
+  late ApiWorkerPreferencesService workerPreferences;
 
   void _initializeServices() {
     auth = ApiAuthService(
@@ -104,6 +119,12 @@ class ServiceLocator {
       baseUrl: _baseUrl,
       enableLogging: _enableLogging,
     );
+
+    workerPreferences = ApiWorkerPreferencesService(this);
+
+    attendance = AttendanceApiService(
+      baseUrl: _baseUrl,
+    );
   }
 
   void updateAuthToken(String? token) {
@@ -111,12 +132,28 @@ class ServiceLocator {
     debugPrint('🔑 updateAuthToken called with: $_authToken');
     _initializeServices(); // rebuild services with the latest token
     _refreshCachedBusinessId();
+    if (token != null && token.isNotEmpty) {
+      unawaited(AuthTokenManager.instance.setManualToken(token));
+    }
   }
 
   void updateCurrentUser(User? user) {
     _currentUser = user;
     debugPrint('👤 updateCurrentUser called with: ${user?.email}');
     _refreshCachedBusinessId();
+    if (user != null && _authToken != null && _authToken!.isNotEmpty) {
+      final map = {
+        'user': user.toJson(),
+        'ownedBusinesses': user.ownedBusinesses.map((b) => b.toJson()).toList(),
+        'teamBusinesses': user.teamBusinesses.map((b) => b.toJson()).toList(),
+      };
+      AuthTokenManager.instance.storeLoginResponse({
+        'token': _authToken,
+        'data': map,
+      }).catchError((error) {
+        debugPrint('Failed to sync user cache: $error');
+      });
+    }
   }
 
   // Getters for ApiBusinessService, authToken, and currentUser
@@ -124,8 +161,7 @@ class ServiceLocator {
   User? get currentUser => _currentUser;
   String? get currentUserBusinessId {
     final direct = _normalizeBusinessId(
-      _currentUser?.selectedBusinessId ??
-          auth.currentUser?.selectedBusinessId,
+      _currentUser?.selectedBusinessId ?? auth.currentUser?.selectedBusinessId,
     );
     if (direct != null) {
       _cachedBusinessId = direct;
@@ -147,8 +183,7 @@ class ServiceLocator {
 
   void _refreshCachedBusinessId() {
     final fromUser = _normalizeBusinessId(
-      _currentUser?.selectedBusinessId ??
-          auth.currentUser?.selectedBusinessId,
+      _currentUser?.selectedBusinessId ?? auth.currentUser?.selectedBusinessId,
     );
 
     final tokenBusiness = _extractBusinessIdFromToken();

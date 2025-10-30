@@ -27,11 +27,20 @@ class _EditAccessDialogState extends State<EditAccessDialog> {
   bool _isSubmitting = false;
 
   final List<String> _roles = ['viewer', 'staff', 'manager', 'admin'];
+  final List<String> _statuses = [
+    'active',
+    'pending',
+    'suspended',
+    'revoked',
+    'expired',
+  ];
+  late String _selectedStatus;
 
   @override
   void initState() {
     super.initState();
     _selectedRole = widget.teamAccess.role;
+    _selectedStatus = widget.teamAccess.status;
     _expiresAt = widget.teamAccess.expiresAt;
     _permissions = widget.teamAccess.permissions;
   }
@@ -160,6 +169,31 @@ class _EditAccessDialogState extends State<EditAccessDialog> {
                             setState(() {
                               _selectedRole = value;
                               _permissions = _getPermissionsForRole(value);
+                            });
+                          }
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      DropdownButtonFormField<String>(
+                        value: _selectedStatus,
+                        decoration: const InputDecoration(
+                          labelText: 'Status',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _statuses
+                            .map(
+                              (status) => DropdownMenuItem(
+                                value: status,
+                                child: Text(status.toUpperCase()),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _selectedStatus = value;
                             });
                           }
                         },
@@ -490,6 +524,7 @@ class _EditAccessDialogState extends State<EditAccessDialog> {
     // Check if anything has changed
     bool hasChanges = false;
     if (_selectedRole != widget.teamAccess.role) hasChanges = true;
+    if (_selectedStatus != widget.teamAccess.status) hasChanges = true;
     if (_expiresAt != widget.teamAccess.expiresAt) hasChanges = true;
 
     // Check if permissions have changed (simplified check)
@@ -511,12 +546,16 @@ class _EditAccessDialogState extends State<EditAccessDialog> {
     try {
       final teamProvider = Provider.of<TeamProvider>(context, listen: false);
       final success = await teamProvider.updateAccess(
+        currentUserId: widget.currentUserId,
         identifier: widget.teamAccess.id,
         role: _selectedRole != widget.teamAccess.role ? _selectedRole : null,
         permissions:
             !_permissionsEqual(_permissions, widget.teamAccess.permissions)
                 ? _permissions
                 : null,
+        status: _selectedStatus != widget.teamAccess.status
+            ? _selectedStatus
+            : null,
         expiresAt:
             _expiresAt != widget.teamAccess.expiresAt ? _expiresAt : null,
         reason: _reasonController.text.trim().isNotEmpty

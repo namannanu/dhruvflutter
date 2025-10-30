@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -25,16 +23,23 @@
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>GMSApiKey</key>
-	<string>AIzaSyBYzLcIMOoqKPfuYtGU7WNj1Z54Efaq1o8</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>This app needs location access to verify your attendance at the designated work location when clocking in and out.</string>
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string>This app needs location access to verify your attendance at the designated work location when clocking in and out.</string>
+	<string>AIzaSyBdv8SvNtnaS8lsHRxKJe-Ufw61YxMOiQQ</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>This app needs location access to verify your attendance at the designated work location when clocking in and out.</string>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<string>Talent uses your location to verify attendance and match you with nearby workplaces.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Talent needs location access to verify your attendance at work locations and track your work hours accurately.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Talent uses your location to verify attendance and track work hours. This ensures accurate time tracking and workplace verification.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>Talent sends you notifications about work schedules, messages from employers, and attendance reminders.</string>
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>WorkerAttendance</key>
+		<string>Full accuracy ensures we can confirm your attendance at the correct work location.</string>
+		<key>PreciseLocationRequired</key>
+		<string>Precise location is required to verify you are at the correct workplace for attendance tracking.</string>
+	</dict>
+	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
@@ -42,16 +47,20 @@
 	<string>Main</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
+		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
-		<string>UIInterfaceOrientationPortrait</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
 </dict>
 </plist>

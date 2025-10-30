@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum NotificationType { application, hire, payment, schedule, message, system }
+enum NotificationType { application, hire, payment, schedule, message, system, attendance }
 
 enum NotificationPriority { low, medium, high }
 
@@ -60,6 +60,8 @@ class AppNotification {
           return NotificationType.schedule;
         case 'message':
           return NotificationType.message;
+        case 'attendance':
+          return NotificationType.attendance;
         case 'system':
         default:
           return NotificationType.system;

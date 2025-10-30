@@ -1,5 +1,6 @@
 // ignore_for_file: require_trailing_commas
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'package:http/http.dart' as http;
@@ -14,7 +15,27 @@ class ApiWorkConnectException implements Exception {
   String toString() => 'ApiWorkConnectException($statusCode): $message';
 }
 
-abstract class BaseApiService {
+class _CacheEntry {
+  final dynamic data;
+  final DateTime expiresAt;
+
+  _CacheEntry(this.data)
+      : expiresAt = DateTime.now().add(const Duration(minutes: 5));
+
+  bool get isExpired => DateTime.now().isAfter(expiresAt);
+}
+
+class NetworkException implements Exception {
+  final String message;
+  final dynamic originalError;
+
+  NetworkException(this.message, [this.originalError]);
+
+  @override
+  String toString() => 'NetworkException: $message';
+}
+
+class BaseApiService {
   final Uri _baseUri;
   final http.Client _client;
   final bool _enableLogging;
@@ -22,30 +43,34 @@ abstract class BaseApiService {
   // Constants
   final int _maxLogBodyLength = 2000;
   static const String _loggerName = 'API';
+  static const Duration _defaultTimeout = Duration(seconds: 30);
 
-  BaseApiService({
-    required String baseUrl,
-    bool enableLogging = false,
-  })  : _baseUri = Uri.parse(baseUrl),
+  // Cache configuration
+  final Map<String, _CacheEntry> _cache = {};
+  Timer? _cacheCleanupTimer;
+  static const Duration _cacheExpiration = Duration(minutes: 5);
+
+  BaseApiService({required String baseUrl, bool enableLogging = false})
+      : _baseUri = Uri.parse(baseUrl),
         _client = http.Client(),
         _enableLogging = enableLogging {
+    developer.log(
+      '🔧 Initializing API Service',
+      name: 'API',
+      error: {'baseUrl': baseUrl},
+    );
     if (_enableLogging) {
       developer.log(
         'Initializing API Service',
         name: _loggerName,
-        error: {
-          'baseUrl': baseUrl,
-          'logging': enableLogging,
-        },
+        error: {'baseUrl': baseUrl, 'logging': enableLogging},
       );
     }
   }
 
   /// Build request headers with optional auth token
   Map<String, String> headers({String? authToken, String? businessId}) {
-    final map = <String, String>{
-      'Content-Type': 'application/json',
-    };
+    final map = <String, String>{'Content-Type': 'application/json'};
 
     if (authToken != null && authToken.isNotEmpty) {
       map['Authorization'] = 'Bearer $authToken';
@@ -78,10 +103,9 @@ abstract class BaseApiService {
         cleanedPath.split('/').where((segment) => segment.isNotEmpty).toList();
 
     var overlap = 0;
-    final maxOverlap =
-        baseSegments.length < pathSegments.length
-            ? baseSegments.length
-            : pathSegments.length;
+    final maxOverlap = baseSegments.length < pathSegments.length
+        ? baseSegments.length
+        : pathSegments.length;
 
     while (overlap < maxOverlap &&
         baseSegments[overlap] == pathSegments[overlap]) {
@@ -217,4 +241,70 @@ abstract class BaseApiService {
 
   /// HTTP client getter
   http.Client get client => _client;
+
+  Future<http.Response> get(
+    dynamic endpoint, {
+    Map<String, String>? headers,
+  }) async {
+    final Uri uri;
+    final String endpointStr;
+
+    if (endpoint is Uri) {
+      uri = endpoint;
+      endpointStr = endpoint.path;
+    } else if (endpoint is String) {
+      uri = resolve(endpoint);
+      endpointStr = endpoint;
+    } else {
+      throw ArgumentError(
+          'endpoint must be String or Uri, got ${endpoint.runtimeType}');
+    }
+
+    final requestHeaders = headers ?? this.headers();
+
+    logApiCall('GET', endpointStr, headers: requestHeaders);
+
+    final response = await _client.get(uri, headers: requestHeaders);
+
+    logApiCall('GET', endpointStr, headers: requestHeaders, response: response);
+    return response;
+  }
+
+  Future<http.Response> post(
+    dynamic endpoint, {
+    Map<String, dynamic>? body,
+    Map<String, String>? headers,
+  }) async {
+    final Uri uri;
+    final String endpointStr;
+
+    if (endpoint is Uri) {
+      uri = endpoint;
+      endpointStr = endpoint.path;
+    } else if (endpoint is String) {
+      uri = resolve(endpoint);
+      endpointStr = endpoint;
+    } else {
+      throw ArgumentError(
+          'endpoint must be String or Uri, got ${endpoint.runtimeType}');
+    }
+
+    final requestHeaders = headers ?? this.headers();
+
+    logApiCall('POST', endpointStr, headers: requestHeaders, requestBody: body);
+
+    final response = await _client.post(
+      uri,
+      headers: requestHeaders,
+      body: body != null ? json.encode(body) : null,
+    );
+
+    logApiCall('POST', endpointStr,
+        headers: requestHeaders, response: response);
+    return response;
+  }
+
+  void dispose() {
+    _client.close();
+  }
 }
