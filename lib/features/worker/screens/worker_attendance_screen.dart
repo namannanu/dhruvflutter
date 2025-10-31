@@ -140,7 +140,7 @@ class _WorkerAttendanceScreenState extends State<WorkerAttendanceScreen> {
       if (errorMessage.contains('already clocked in')) {
         _showSnack('You are already clocked in for this shift');
         // Refresh attendance records to sync UI state with server
-        appState.loadWorkerAttendanceRecords();
+        await appState.loadWorkerAttendanceRecords();
       } else if (errorMessage.contains('missing a GPS location') ||
           errorMessage.contains('configure a business location')) {
         _showLocationConfigurationDialog(record);

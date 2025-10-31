@@ -1,4 +1,4 @@
-// ignore_for_file: directives_ordering, require_trailing_commas, avoid_print
+// ignore_for_file: directives_ordering, require_trailing_commas, avoid_print, deprecated_member_use
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -220,6 +220,131 @@ class _WorkerJobFeedScreenState extends State<WorkerJobFeedScreen> {
   }
 }
 
+class WorkerPremiumUpgradeScreen extends StatelessWidget {
+  const WorkerPremiumUpgradeScreen({super.key, this.pendingJob});
+
+  final JobPosting? pendingJob;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final job = pendingJob;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Upgrade to Premium'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          Text(
+            'Unlock unlimited applications',
+            style: theme.textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            job != null
+                ? 'Upgrade now to finish applying for ${job.title} and other premium roles.'
+                : 'Upgrade now to access premium jobs and apply without limits.',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 24),
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side:
+                  BorderSide(color: theme.colorScheme.primary.withOpacity(.1)),
+            ),
+            child: const Column(
+              children: [
+                ListTile(
+                  leading: Icon(Icons.work_outline),
+                  title: Text('Unlimited applications'),
+                  subtitle: Text(
+                    'Submit as many applications as you need each month.',
+                  ),
+                ),
+                Divider(height: 0),
+                ListTile(
+                  leading: Icon(Icons.workspace_premium_outlined),
+                  title: Text('Premium job access'),
+                  subtitle: Text('See roles from top employers before others.'),
+                ),
+                Divider(height: 0),
+                ListTile(
+                  leading: Icon(Icons.support_agent_outlined),
+                  title: Text('Priority support'),
+                  subtitle:
+                      Text('Get fast help from our support and career team.'),
+                ),
+              ],
+            ),
+          ),
+          if (job != null) ...[
+            const SizedBox(height: 24),
+            Text(
+              'Ready to submit',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      job.title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (job.businessName.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text('Company: ${job.businessName}'),
+                    ],
+                    const SizedBox(height: 8),
+                    Text(
+                      'Rate: \$${job.hourlyRate.toStringAsFixed(2)}/hr',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 32),
+          ElevatedButton.icon(
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Premium upgrade flow coming soon — contact support to enable.',
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.lock_open),
+            label: const Text('Contact support to upgrade'),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: () => Navigator.of(context).maybePop(),
+            child: const Text('Maybe later'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class JobCard extends StatelessWidget {
   const JobCard({
     super.key,
@@ -330,11 +455,59 @@ class JobCard extends StatelessWidget {
 
               const SizedBox(height: 12),
 
-              if (job.hasApplied != true)
-                FilledButton.tonal(
-                  onPressed: () => _handleApply(context),
-                  child: Text('${job.applicantsCount} applicants · Apply now'),
+              if (job.hasApplied != true) ...[
+                Builder(
+                  builder: (context) {
+                    final appState = context.watch<AppState>();
+                    final canApply = appState.canApplyToJob();
+
+                    return FilledButton.tonal(
+                      onPressed: () => _handleApply(context),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: canApply
+                            ? null
+                            : Theme.of(context)
+                                .colorScheme
+                                .secondary
+                                .withOpacity(0.1),
+                      ),
+                      child: Text(
+                        canApply
+                            ? '${job.applicantsCount} applicants · Apply now'
+                            : 'Upgrade to Premium to Apply',
+                      ),
+                    );
+                  },
                 ),
+                // Show remaining applications info for free users
+                Builder(
+                  builder: (context) {
+                    final appState = context.watch<AppState>();
+                    final remainingApplications =
+                        appState.getRemainingApplications();
+                    final profile = appState.workerProfile;
+
+                    if (profile?.isPremium == true) {
+                      return const SizedBox.shrink();
+                    }
+
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        remainingApplications > 0
+                            ? 'You have $remainingApplications application${remainingApplications == 1 ? '' : 's'} remaining'
+                            : 'Application limit reached - Upgrade to Premium',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: remainingApplications > 0
+                                  ? Colors.green.shade700
+                                  : Colors.orange.shade700,
+                            ),
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  },
+                ),
+              ],
             ],
           ),
         ),
@@ -343,6 +516,14 @@ class JobCard extends StatelessWidget {
   }
 
   Future<void> _handleApply(BuildContext context) async {
+    final appState = context.read<AppState>();
+
+    // Check if user can apply to more jobs
+    if (!appState.canApplyToJob()) {
+      _showPremiumUpgradeDialog(context, job);
+      return;
+    }
+
     final noteController = TextEditingController();
 
     final message = await showDialog<String>(
@@ -474,13 +655,9 @@ class JobCard extends StatelessWidget {
   }
 
   void _navigateToSubscriptionPage(BuildContext context, JobPosting job) {
-    // TODO: Navigate to subscription/premium upgrade page
-    // For now, show a placeholder
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content:
-            Text('Subscription page coming soon! Contact support for now.'),
-        duration: Duration(seconds: 3),
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => WorkerPremiumUpgradeScreen(pendingJob: job),
       ),
     );
   }

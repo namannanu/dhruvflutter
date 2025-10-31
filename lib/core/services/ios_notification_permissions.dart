@@ -1,6 +1,6 @@
-import 'dart:io';
-import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:talent/core/utils/platform_helper.dart';
 
 class IOSNotificationPermissions {
   static const MethodChannel _channel =
@@ -8,7 +8,8 @@ class IOSNotificationPermissions {
 
   /// Request notification permissions on iOS
   static Future<bool> requestNotificationPermissions() async {
-    if (!Platform.isIOS) return true;
+    // Return true immediately if not on iOS platform
+    if (!PlatformHelper.isIOS) return true;
 
     try {
       final dynamic result =
@@ -25,7 +26,8 @@ class IOSNotificationPermissions {
 
   /// Check current notification permission status
   static Future<bool> checkNotificationPermissions() async {
-    if (!Platform.isIOS) return true;
+    // Return true immediately if not on iOS platform
+    if (!PlatformHelper.isIOS) return true;
 
     try {
       final dynamic result =
@@ -42,7 +44,8 @@ class IOSNotificationPermissions {
 
   /// Open iOS settings for notifications
   static Future<void> openNotificationSettings() async {
-    if (!Platform.isIOS) return;
+    // Return immediately if not on iOS platform
+    if (!PlatformHelper.isIOS) return;
 
     try {
       await _channel.invokeMethod('openNotificationSettings');

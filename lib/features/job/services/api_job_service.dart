@@ -683,6 +683,57 @@ class ApiJobService extends BaseApiService implements JobService {
           _stringList(worker?['skills']) ??
           <String>[];
 
+      final jobMap = _mapOrNull(json['job']);
+      final employerMap =
+          _mapOrNull(json['employer']) ?? _mapOrNull(jobMap?['employer']);
+      final businessMap =
+          _mapOrNull(json['business']) ?? _mapOrNull(jobMap?['business']);
+
+      String? firstNonEmpty(Iterable<String?> values) {
+        for (final value in values) {
+          final trimmed = value?.trim();
+          if (trimmed != null && trimmed.isNotEmpty) {
+            return trimmed;
+          }
+        }
+        return null;
+      }
+
+      final employerEmail = firstNonEmpty([
+        _string(json['employerEmail']),
+        _string(employerMap?['email']),
+        _string(jobMap?['employerEmail']),
+      ]);
+
+      final employerName = firstNonEmpty([
+        _composeName(employerMap),
+        _string(json['employerName']),
+        _string(jobMap?['employerName']),
+        _string(employerMap?['name']),
+        employerEmail,
+      ]);
+
+      final employerId = firstNonEmpty([
+        _string(json['employerId']),
+        _string(employerMap?['_id']),
+        _string(employerMap?['id']),
+        _string(jobMap?['employerId']),
+      ]);
+
+      final businessId = firstNonEmpty([
+        _string(json['businessId']),
+        _string(businessMap?['_id']),
+        _string(businessMap?['id']),
+        _string(jobMap?['businessId']),
+      ]);
+
+      final businessName = firstNonEmpty([
+        _string(json['businessName']),
+        _string(businessMap?['businessName']),
+        _string(businessMap?['name']),
+        _string(jobMap?['businessName']),
+      ]);
+
       final statusString = _string(json['status']);
       final status = _parseApplicationStatus(statusString);
       final createdAt =
@@ -703,6 +754,11 @@ class ApiJobService extends BaseApiService implements JobService {
         workerSkills: workerSkills,
         note: note,
         message: message,
+        employerId: employerId,
+        employerEmail: employerEmail,
+        employerName: employerName,
+        businessId: businessId,
+        businessName: businessName,
       );
     }
   }

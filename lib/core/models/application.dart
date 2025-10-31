@@ -48,6 +48,12 @@ Map<String, dynamic>? _mapOrNull(dynamic value) {
   return null;
 }
 
+String? _stringValue(dynamic value) {
+  if (value == null) return null;
+  final string = value.toString().trim();
+  return string.isEmpty ? null : string;
+}
+
 /// Represents a job application in the system
 class Application {
   final String id;
@@ -68,6 +74,11 @@ class Application {
   final String workerName;
   final String workerExperience;
   final List<String> workerSkills;
+  final String? employerId;
+  final String? employerName;
+  final String? employerEmail;
+  final String? businessId;
+  final String? businessName;
   final String? createdByTag;
 
   Application({
@@ -89,6 +100,11 @@ class Application {
     String? workerName,
     String? workerExperience,
     List<String>? workerSkills,
+    this.employerId,
+    this.employerName,
+    this.employerEmail,
+    this.businessId,
+    this.businessName,
     this.createdByTag,
   })  : rawStatus = (rawStatus ?? status.name).toLowerCase(),
         createdAt = createdAt ??
@@ -105,6 +121,12 @@ class Application {
     final jobMap = _mapOrNull(json['job']);
     final snapshotMap =
         _mapOrNull(json['snapshot']) ?? const <String, dynamic>{};
+    final employerMap = _mapOrNull(json['employer']) ??
+        _mapOrNull(jobMap?['employer']) ??
+        _mapOrNull(snapshotMap['employer']);
+    final businessMap = _mapOrNull(json['business']) ??
+        _mapOrNull(jobMap?['business']) ??
+        _mapOrNull(snapshotMap['business']);
 
     final idValue = json['_id'] ?? json['id'];
     final workerIdValue = workerMap?['_id'] ??
@@ -185,12 +207,108 @@ class Application {
     final workerSkillsValue =
         json['workerSkills'] ?? snapshotMap['skills'] ?? workerMap?['skills'];
 
+    final employerIdValue = _stringValue(json['employerId']) ??
+        _stringValue(employerMap?['_id']) ??
+        _stringValue(employerMap?['id']) ??
+        _stringValue(jobMap?['employerId']) ??
+        _stringValue(snapshotMap['employerId']);
+
+    final employerEmailValue = _stringValue(json['employerEmail']) ??
+        _stringValue(employerMap?['email']) ??
+        _stringValue(jobMap?['employerEmail']) ??
+        _stringValue(snapshotMap['employerEmail']);
+
+    final employerNameCandidates = <String?>[
+      _stringValue(json['employerName']),
+      _stringValue(snapshotMap['employerName']),
+      _stringValue(jobMap?['employerName']),
+      _stringValue(employerMap?['name']),
+    ];
+
+    if (employerMap != null) {
+      final firstName = _stringValue(employerMap['firstName']) ??
+          _stringValue(employerMap['firstname']);
+      final lastName = _stringValue(employerMap['lastName']) ??
+          _stringValue(employerMap['lastname']);
+
+      final combined = [
+        if (firstName != null && firstName.isNotEmpty) firstName,
+        if (lastName != null && lastName.isNotEmpty) lastName,
+      ].join(' ');
+      if (combined.isNotEmpty) {
+        employerNameCandidates.add(combined);
+      }
+
+      final displayName = _stringValue(employerMap['displayName']);
+      if (displayName != null && displayName.isNotEmpty) {
+        employerNameCandidates.add(displayName);
+      }
+    }
+
+    if (employerEmailValue != null && employerEmailValue.isNotEmpty) {
+      employerNameCandidates.add(employerEmailValue);
+    }
+
+    String? employerNameValue;
+    for (final candidate in employerNameCandidates) {
+      final trimmed = candidate?.trim();
+      if (trimmed != null && trimmed.isNotEmpty) {
+        employerNameValue = trimmed;
+        break;
+      }
+    }
+
+    final businessIdValue = _stringValue(json['businessId']) ??
+        _stringValue(businessMap?['_id']) ??
+        _stringValue(businessMap?['id']) ??
+        _stringValue(jobMap?['businessId']) ??
+        _stringValue(snapshotMap['businessId']);
+
+    final businessNameCandidates = <String?>[
+      _stringValue(json['businessName']),
+      _stringValue(snapshotMap['businessName']),
+      _stringValue(businessMap?['businessName']),
+      _stringValue(businessMap?['name']),
+      _stringValue(jobMap?['businessName']),
+    ];
+
+    String? businessNameValue;
+    for (final candidate in businessNameCandidates) {
+      final trimmed = candidate?.trim();
+      if (trimmed != null && trimmed.isNotEmpty) {
+        businessNameValue = trimmed;
+        break;
+      }
+    }
+
     final messageValue = json['message']?.toString();
     final noteValue = (json['note'] ??
             json['hiringNotes'] ??
             json['employerNote'] ??
             json['workerNote'])
         ?.toString();
+
+    final jobPosting =
+        jobMap != null ? JobPosting.fromJson(jobMap) : null;
+
+    final resolvedEmployerId = employerIdValue ??
+        (jobPosting != null && jobPosting.employerId.isNotEmpty
+            ? jobPosting.employerId
+            : null);
+    final resolvedEmployerEmail =
+        employerEmailValue ?? jobPosting?.employerEmail;
+    final resolvedEmployerName =
+        employerNameValue ?? jobPosting?.employerName;
+    final jobBusinessId =
+        jobPosting != null && jobPosting.businessId.isNotEmpty
+            ? jobPosting.businessId
+            : null;
+    final resolvedBusinessId = businessIdValue ?? jobBusinessId;
+    final jobBusinessName = jobPosting?.businessName;
+    final resolvedBusinessName = businessNameValue ??
+        (jobBusinessName != null && jobBusinessName.isNotEmpty
+            ? jobBusinessName
+            : null);
 
     return Application(
       id: idValue?.toString() ?? '',
@@ -208,11 +326,16 @@ class Application {
       hiredAt: DateTime.tryParse(hiredAtRaw?.toString() ?? ''),
       rejectedAt: DateTime.tryParse(rejectedAtRaw?.toString() ?? ''),
       withdrawnAt: DateTime.tryParse(withdrawnAtRaw?.toString() ?? ''),
-      job: jobMap != null ? JobPosting.fromJson(jobMap) : null,
+      job: jobPosting,
       worker: workerMap != null ? User.fromJson(workerMap) : null,
       workerName: workerName,
       workerExperience: workerExperienceValue?.toString(),
       workerSkills: _parseStringList(workerSkillsValue),
+      employerId: resolvedEmployerId,
+      employerEmail: resolvedEmployerEmail,
+      employerName: resolvedEmployerName,
+      businessId: resolvedBusinessId,
+      businessName: resolvedBusinessName,
       createdByTag: json['createdByTag']?.toString(),
     );
   }
@@ -235,6 +358,11 @@ class Application {
       'workerExperience': workerExperience,
       'workerSkills': workerSkills,
       'createdByTag': createdByTag,
+      'employerId': employerId,
+      'employerName': employerName,
+      'employerEmail': employerEmail,
+      'businessId': businessId,
+      'businessName': businessName,
       if (job != null) 'job': job!.toJson(),
       if (worker != null) 'worker': worker!.toJson(),
     };
@@ -260,6 +388,11 @@ class Application {
     String? workerExperience,
     List<String>? workerSkills,
     String? createdByTag,
+    String? employerId,
+    String? employerName,
+    String? employerEmail,
+    String? businessId,
+    String? businessName,
   }) {
     return Application(
       id: id ?? this.id,
@@ -281,6 +414,11 @@ class Application {
       workerExperience: workerExperience ?? this.workerExperience,
       workerSkills: workerSkills ?? this.workerSkills,
       createdByTag: createdByTag ?? this.createdByTag,
+      employerId: employerId ?? this.employerId,
+      employerName: employerName ?? this.employerName,
+      employerEmail: employerEmail ?? this.employerEmail,
+      businessId: businessId ?? this.businessId,
+      businessName: businessName ?? this.businessName,
     );
   }
 

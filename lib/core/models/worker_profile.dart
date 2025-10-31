@@ -30,6 +30,8 @@ class WorkerProfile {
     this.isVisible,
     this.locationEnabled,
     this.shareWorkHistory,
+    this.isPremium = false,
+    this.premiumExpiresAt,
   });
 
   final String id;
@@ -59,6 +61,8 @@ class WorkerProfile {
   final bool? isVisible;
   final bool? locationEnabled;
   final bool? shareWorkHistory;
+  final bool isPremium;
+  final DateTime? premiumExpiresAt;
 
   WorkerProfile copyWith({
     String? id,
@@ -88,6 +92,8 @@ class WorkerProfile {
     bool? isVisible,
     bool? locationEnabled,
     bool? shareWorkHistory,
+    bool? isPremium,
+    DateTime? premiumExpiresAt,
   }) {
     return WorkerProfile(
       id: id ?? this.id,
@@ -119,6 +125,8 @@ class WorkerProfile {
       isVisible: isVisible ?? this.isVisible,
       locationEnabled: locationEnabled ?? this.locationEnabled,
       shareWorkHistory: shareWorkHistory ?? this.shareWorkHistory,
+      isPremium: isPremium ?? this.isPremium,
+      premiumExpiresAt: premiumExpiresAt ?? this.premiumExpiresAt,
     );
   }
 
@@ -261,6 +269,10 @@ class WorkerProfile {
       isVisible: nullableBool(payload['isVisible']),
       locationEnabled: nullableBool(payload['locationEnabled']),
       shareWorkHistory: nullableBool(payload['shareWorkHistory']),
+      isPremium: boolValue(payload['isPremium']),
+      premiumExpiresAt: payload['premiumExpiresAt'] != null
+          ? DateTime.tryParse(payload['premiumExpiresAt'].toString())
+          : null,
     );
   }
 
@@ -293,6 +305,8 @@ class WorkerProfile {
       'isVisible': isVisible,
       'locationEnabled': locationEnabled,
       'shareWorkHistory': shareWorkHistory,
+      'isPremium': isPremium,
+      'premiumExpiresAt': premiumExpiresAt?.toIso8601String(),
     };
   }
 }

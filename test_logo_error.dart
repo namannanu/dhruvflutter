@@ -1,10 +1,12 @@
+// ignore_for_file: avoid_print
+
 import 'lib/features/job/job.dart';
 
 void main() {
   print('Testing logo type error...');
 
   // Simulate JSON that might cause the logo type error
-  var testJson1 = {
+  final testJson1 = {
     'title': 'Test Job',
     'description': 'Test Description',
     'employerId': 'emp123',
@@ -21,7 +23,7 @@ void main() {
     'applicantsCount': 5
   };
 
-  var testJson2 = {
+  final testJson2 = {
     'title': 'Test Job 2',
     'description': 'Test Description 2',
     'employerId': 'emp123',
@@ -40,7 +42,7 @@ void main() {
 
   print('\n=== Testing with string logo ===');
   try {
-    var job1 = JobPosting.fromJson(testJson1);
+    final job1 = JobPosting.fromJson(testJson1);
     print('Successfully created job1: ${job1.title}');
   } catch (e) {
     print('Error creating job1: $e');
@@ -48,7 +50,7 @@ void main() {
 
   print('\n=== Testing with integer logo ===');
   try {
-    var job2 = JobPosting.fromJson(testJson2);
+    final job2 = JobPosting.fromJson(testJson2);
     print('Successfully created job2: ${job2.title}');
   } catch (e) {
     print('Error creating job2: $e');

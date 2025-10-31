@@ -1,4 +1,4 @@
-// ignore_for_file: avoid_print
+// ignore_for_file: avoid_print, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../core/models/team_access.dart';
 import '../../../core/providers/team_provider.dart';
 import '../../../core/state/app_state.dart';
+import '../../team_management/services/team_invitation_service.dart';
 import '../widgets/edit_access_dialog.dart';
 import '../widgets/grant_access_dialog.dart';
 import '../widgets/invite_team_member_dialog.dart';
@@ -84,33 +85,47 @@ class _TeamManagementScreenState extends State<TeamManagementScreen>
 
               if (businessId != null) {
                 print('=== TESTING API DIRECTLY ===');
-                // TODO: Replace with working team invitation service
                 print('Business ID: $businessId');
-                print(
-                    'Team invitation functionality moved to new TeamManagementPage');
-                /*
-                final teamApiService = TeamApiService();
-                final result = await teamApiService.testInviteAPI(
-                  businessId: businessId,
-                  email: 'test@example.com',
-                  role: 'employee',
-                  permissions: ['view_team_members'],
-                );
-                
-                if (result != null) {
-                */
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content:
-                          Text('Use new Team Management page for invitations')),
-                );
-                /*
-                } else {
+                final invitationService = TeamInvitationService();
+                final testEmail =
+                    'team-test+${DateTime.now().millisecondsSinceEpoch}@example.com';
+                try {
+                  final result = await invitationService.inviteTeamMember(
+                    userEmail: testEmail,
+                    businessId: businessId,
+                    role: 'staff',
+                    permissions: const {'view_team_members': true},
+                  );
+
+                  if (!mounted) {
+                    return;
+                  }
+
+                  if (result != null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Invitation sent to $testEmail'),
+                      ),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Invitation request failed - see logs'),
+                      ),
+                    );
+                  }
+                } catch (error) {
+                  if (!mounted) {
+                    return;
+                  }
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Test API call failed - check console')),
+                    SnackBar(
+                      content: Text(
+                        'Invitation error: ${error.toString().split('\n').first}',
+                      ),
+                    ),
                   );
                 }
-                */
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('No business selected')),

@@ -16,7 +16,6 @@ import 'package:talent/features/worker/services/api_worker_service.dart';
 import 'package:talent/services/auth_token_manager.dart';
 
 import '../cache/worker_cache_repository.dart';
-import 'package:talent/features/worker/services/api_worker_preferences_service.dart';
 
 class ServiceLocator {
   // 🔑 Singleton instance
@@ -79,7 +78,6 @@ class ServiceLocator {
   late ApiShiftService shift;
   late ApiMessagingService messaging;
   late AttendanceApiService attendance;
-  late ApiWorkerPreferencesService workerPreferences;
 
   void _initializeServices() {
     auth = ApiAuthService(
@@ -119,8 +117,6 @@ class ServiceLocator {
       baseUrl: _baseUrl,
       enableLogging: _enableLogging,
     );
-
-    workerPreferences = ApiWorkerPreferencesService(this);
 
     attendance = AttendanceApiService(
       baseUrl: _baseUrl,

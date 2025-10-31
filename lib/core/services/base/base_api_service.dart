@@ -15,16 +15,6 @@ class ApiWorkConnectException implements Exception {
   String toString() => 'ApiWorkConnectException($statusCode): $message';
 }
 
-class _CacheEntry {
-  final dynamic data;
-  final DateTime expiresAt;
-
-  _CacheEntry(this.data)
-      : expiresAt = DateTime.now().add(const Duration(minutes: 5));
-
-  bool get isExpired => DateTime.now().isAfter(expiresAt);
-}
-
 class NetworkException implements Exception {
   final String message;
   final dynamic originalError;
@@ -43,12 +33,6 @@ class BaseApiService {
   // Constants
   final int _maxLogBodyLength = 2000;
   static const String _loggerName = 'API';
-  static const Duration _defaultTimeout = Duration(seconds: 30);
-
-  // Cache configuration
-  final Map<String, _CacheEntry> _cache = {};
-  Timer? _cacheCleanupTimer;
-  static const Duration _cacheExpiration = Duration(minutes: 5);
 
   BaseApiService({required String baseUrl, bool enableLogging = false})
       : _baseUri = Uri.parse(baseUrl),

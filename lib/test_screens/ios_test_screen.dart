@@ -1,11 +1,13 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'package:flutter/material.dart';
+import 'package:talent/core/services/ios_notification_permissions.dart';
 import 'package:talent/core/services/location_service.dart';
 import 'package:talent/core/services/push_notification_service.dart';
 import 'package:talent/core/widgets/ios_location_permission_dialog.dart';
-import 'package:talent/core/services/ios_notification_permissions.dart';
 
 class IOSTestScreen extends StatefulWidget {
-  const IOSTestScreen({Key? key}) : super(key: key);
+  const IOSTestScreen({super.key});
 
   @override
   State<IOSTestScreen> createState() => _IOSTestScreenState();

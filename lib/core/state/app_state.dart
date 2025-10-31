@@ -14,8 +14,8 @@ import 'package:talent/core/models/models.dart';
 import 'package:talent/core/services/business_access_context.dart';
 import 'package:talent/core/services/location_service.dart';
 import 'package:talent/core/services/locator/service_locator.dart';
-import 'package:talent/core/services/user_permissions_service.dart';
 import 'package:talent/core/services/push_notification_service.dart';
+import 'package:talent/core/services/user_permissions_service.dart';
 
 part 'payment_extensions.dart';
 
@@ -90,17 +90,30 @@ class AppState extends ChangeNotifier {
     String? weekAvailability,
     required List<Map<String, dynamic>> availability,
   }) async {
+    if (_workerProfile == null) return;
+
+    final workerId = _workerProfile!.id.isNotEmpty
+        ? _workerProfile!.id
+        : (_currentUser?.id ?? '');
+
+    if (workerId.isEmpty) {
+      debugPrint('⚠️ Cannot update worker profile: missing workerId');
+      return;
+    }
+
     _setBusy(true);
     try {
-      final updatedProfile = await _service.workerPreferences.updatePreferences(
+      final updatedProfile = await _service.worker.updateWorkerProfile(
+        workerId: workerId,
         minimumPay: minimumPay,
         maxTravelDistance: maxTravelDistance,
         availableForFullTime: availableForFullTime,
         availableForPartTime: availableForPartTime,
         availableForTemporary: availableForTemporary,
         weekAvailability: weekAvailability,
+        availability: availability,
       );
-      _workerProfile = updatedProfile as WorkerProfile?;
+      _workerProfile = updatedProfile;
       notifyListeners();
     } finally {
       _setBusy(false);
@@ -112,15 +125,55 @@ class AppState extends ChangeNotifier {
     bool? locationEnabled,
     bool? shareWorkHistory,
   }) async {
+    if (_workerProfile == null) return;
+
+    final workerId = _workerProfile!.id.isNotEmpty
+        ? _workerProfile!.id
+        : (_currentUser?.id ?? '');
+
+    if (workerId.isEmpty) {
+      debugPrint('⚠️ Cannot update worker profile: missing workerId');
+      return;
+    }
+
     _setBusy(true);
     try {
-      final updatedProfile =
-          await _service.workerPreferences.updatePrivacySettings(
+      final updatedProfile = await _service.worker.updateWorkerProfile(
+        workerId: workerId,
         isVisible: isVisible,
         locationEnabled: locationEnabled,
         shareWorkHistory: shareWorkHistory,
       );
-      _workerProfile = updatedProfile as WorkerProfile?;
+      _workerProfile = updatedProfile;
+      notifyListeners();
+    } finally {
+      _setBusy(false);
+    }
+  }
+
+  Future<void> updateWorkerNotificationSettings({
+    bool? pushEnabled,
+    bool? emailEnabled,
+  }) async {
+    if (_workerProfile == null) return;
+
+    final workerId = _workerProfile!.id.isNotEmpty
+        ? _workerProfile!.id
+        : (_currentUser?.id ?? '');
+
+    if (workerId.isEmpty) {
+      debugPrint('⚠️ Cannot update worker profile: missing workerId');
+      return;
+    }
+
+    _setBusy(true);
+    try {
+      final updatedProfile = await _service.worker.updateWorkerProfile(
+        workerId: workerId,
+        notificationsEnabled: pushEnabled,
+        emailNotificationsEnabled: emailEnabled,
+      );
+      _workerProfile = updatedProfile;
       notifyListeners();
     } finally {
       _setBusy(false);
@@ -130,15 +183,27 @@ class AppState extends ChangeNotifier {
   Future<void> deleteAccount() async {
     _setBusy(true);
     try {
-      await _service.workerPreferences.deleteAccount();
+      final token = await _service.getAuthToken();
+      final response = await http.delete(
+        Uri.parse('${_service.apiUrl}/workers/me'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null && token.isNotEmpty)
+            'Authorization': 'Bearer $token',
+        },
+      );
 
-      // Clear all local data
+      if (response.statusCode != 200 && response.statusCode != 204) {
+        throw Exception(
+          'Failed to delete account: ${response.statusCode} ${response.body}',
+        );
+      }
+
+      await _service.auth.logout();
+      _stopNotificationRefresh();
       _currentUser = null;
       _activeRole = null;
-      _workerProfile = null;
-      _employerProfile = null;
-      await _service.auth.logout();
-      notifyListeners();
+      _resetState();
     } finally {
       _setBusy(false);
     }
@@ -721,20 +786,12 @@ class AppState extends ChangeNotifier {
           // _workerMetrics = await fetchWorkerMetrics(_currentUser!.id);
           // _workerJobs = await fetchAvailableJobs();
 
-          // Fetch worker applications from API
+          // Fetch worker applications from API using dedicated method
           try {
-            if (_service.authToken == null) {
-              print('❌ Cannot fetch applications: No auth token available');
-              _workerApplications = [];
-            } else {
-              print('🔍 Auth token available, fetching applications...');
-              _workerApplications =
-                  await _service.worker.fetchWorkerApplications('me');
-              print(
-                  '✅ Loaded ${_workerApplications.length} worker applications');
-            }
+            await loadWorkerApplications(_currentUser!.id);
           } catch (e) {
-            print('❌ Error fetching worker applications: $e');
+            print(
+                '❌ Error in refreshActiveRole loading worker applications: $e');
             _workerApplications = []; // Fallback to empty list
           }
 
@@ -2228,23 +2285,14 @@ class AppState extends ChangeNotifier {
             _employerApplications.indexWhere((app) => app.id == applicationId);
         if (index != -1) {
           final application = _employerApplications[index];
-          _employerApplications[index] = Application(
-            id: application.id,
-            jobId: application.jobId,
-            workerId: application.workerId,
-            workerName: application.workerName,
-            workerExperience: application.workerExperience,
-            workerSkills: application.workerSkills,
-            status: ApplicationStatus.hired,
-            submittedAt: application.submittedAt,
-            note: application.note,
-          );
+          _employerApplications[index] =
+              application.copyWith(status: ApplicationStatus.hired);
 
           // Trigger notification to worker about being hired
-          _sendHireNotification(application);
+          unawaited(_sendHireNotification(application));
 
           // Force immediate notification refresh for all users
-          _forceNotificationRefresh();
+          unawaited(_forceNotificationRefresh());
         }
 
         notifyListeners();
@@ -2297,15 +2345,8 @@ class AppState extends ChangeNotifier {
             _employerApplications.indexWhere((app) => app.id == applicationId);
         if (index != -1) {
           final application = _employerApplications[index];
-          _employerApplications[index] = Application(
-            id: application.id,
-            jobId: application.jobId,
-            workerId: application.workerId,
-            workerName: application.workerName,
-            workerExperience: application.workerExperience,
-            workerSkills: application.workerSkills,
+          _employerApplications[index] = application.copyWith(
             status: status,
-            submittedAt: application.submittedAt,
             note: note ?? application.note,
           );
         }
@@ -2374,10 +2415,10 @@ class AppState extends ChangeNotifier {
 
     _setBusy(true);
     try {
-      // TODO: Replace with actual API call
-      print('Refreshing worker attendance data');
-
-      // For now, just trigger a rebuild with existing data
+      final workerId =
+          _extractObjectId(_currentUser?.id) ?? (_currentUser?.id ?? 'me');
+      final records = await _service.worker.fetchWorkerAttendance(workerId);
+      _workerAttendance = records;
       notifyListeners();
     } catch (error) {
       print('Error refreshing worker attendance: $error');
@@ -2482,6 +2523,51 @@ class AppState extends ChangeNotifier {
 
       // Set empty jobs list instead of rethrowing to prevent app crashes
       _workerJobs = [];
+      notifyListeners();
+      rethrow;
+    } finally {
+      _setBusy(false);
+    }
+  }
+
+  Future<void> loadWorkerApplications(String workerId) async {
+    _setBusy(true);
+    try {
+      print('🔍 Loading worker applications for: $workerId');
+      print('🔍 Current user: ${_currentUser?.email}');
+      print('🔍 User type: ${_currentUser?.type}');
+      print('🔍 Auth token available: ${_service.authToken != null}');
+
+      if (_service.authToken == null) {
+        print('❌ Cannot fetch applications: No auth token available');
+        _workerApplications = [];
+        notifyListeners();
+        return;
+      }
+
+      // Fetch worker applications from the API
+      _workerApplications =
+          await _service.worker.fetchWorkerApplications(workerId);
+      print('✅ Loaded ${_workerApplications.length} worker applications');
+
+      notifyListeners();
+    } catch (error) {
+      print('❌ Error loading worker applications: $error');
+
+      // Provide more specific error feedback
+      if (error.toString().contains('Authentication required') ||
+          error.toString().contains('401')) {
+        print('❌ Authentication issue: User might need to log in again');
+      } else if (error.toString().contains('404')) {
+        print(
+            '❌ Applications API endpoint not found - check API configuration');
+      } else if (error.toString().contains('timeout') ||
+          error.toString().contains('SocketException')) {
+        print('❌ Network issue: Check internet connection');
+      }
+
+      // Set empty applications list instead of rethrowing to prevent app crashes
+      _workerApplications = [];
       notifyListeners();
       rethrow;
     } finally {
@@ -2614,6 +2700,17 @@ class AppState extends ChangeNotifier {
     List<String>? languages,
     List<Map<String, dynamic>>? availability,
     bool? notificationsEnabled,
+    bool? emailNotificationsEnabled,
+    double? minimumPay,
+    double? maxTravelDistance,
+    bool? availableForFullTime,
+    bool? availableForPartTime,
+    bool? availableForTemporary,
+    String? weekAvailability,
+    bool? isVisible,
+    bool? locationEnabled,
+    bool? shareWorkHistory,
+    double? preferredRadiusMiles,
   }) async {
     if (_workerProfile == null) return;
 
@@ -2639,6 +2736,17 @@ class AppState extends ChangeNotifier {
         languages: languages,
         availability: availability,
         notificationsEnabled: notificationsEnabled,
+        emailNotificationsEnabled: emailNotificationsEnabled,
+        minimumPay: minimumPay,
+        maxTravelDistance: maxTravelDistance,
+        availableForFullTime: availableForFullTime,
+        availableForPartTime: availableForPartTime,
+        availableForTemporary: availableForTemporary,
+        weekAvailability: weekAvailability,
+        isVisible: isVisible,
+        locationEnabled: locationEnabled,
+        shareWorkHistory: shareWorkHistory,
+        preferredRadiusMiles: preferredRadiusMiles,
       );
 
       _workerProfile = updatedProfile;
@@ -2683,29 +2791,19 @@ class AppState extends ChangeNotifier {
   }) async {
     _setBusy(true);
     try {
-      // TODO: Replace with actual API call
-      print('Withdrawing worker application: $applicationId');
-      if (message != null) {
-        print('Withdrawal message: $message');
-      }
+      final trimmedMessage = message?.trim();
+      final application = await service.worker.withdrawApplication(
+        applicationId: applicationId,
+        message:
+            (trimmedMessage != null && trimmedMessage.isNotEmpty) ? trimmedMessage : null,
+      );
 
-      // Update the application status in the local list
       final index =
           _workerApplications.indexWhere((app) => app.id == applicationId);
       if (index != -1) {
-        final application = _workerApplications[index];
-        _workerApplications[index] = Application(
-          id: application.id,
-          jobId: application.jobId,
-          workerId: application.workerId,
-          workerName: application.workerName,
-          workerExperience: application.workerExperience,
-          workerSkills: application.workerSkills,
-          status: ApplicationStatus
-              .rejected, // Withdrawn applications are marked as rejected
-          submittedAt: application.submittedAt,
-          note: message ?? application.note,
-        );
+        _workerApplications[index] = application;
+      } else {
+        _workerApplications.add(application);
       }
 
       notifyListeners();
@@ -3161,62 +3259,4 @@ class _PendingJobPayment {
   final String currency;
   final String orderId;
   final String? paymentMethodHint;
-}
-
-// Worker preference methods
-extension WorkerPreferencesMethods on AppState {
-  Future<void> updateWorkerNotificationSettings({
-    bool? pushEnabled,
-    bool? emailEnabled,
-  }) async {
-    _setBusy(true);
-    try {
-      final updatedProfile = await _service.worker.updateWorkerProfile(
-        workerId: _workerProfile?.id ?? '',
-        notificationsEnabled: pushEnabled,
-        emailNotificationsEnabled: emailEnabled,
-      );
-      _workerProfile = updatedProfile;
-      notifyListeners();
-    } finally {
-      _setBusy(false);
-    }
-  }
-
-  Future<void> updatePrivacySettings({
-    bool? isVisible,
-    bool? locationEnabled,
-    bool? shareWorkHistory,
-  }) async {
-    _setBusy(true);
-    try {
-      final updatedProfile =
-          await _service.workerPreferences.updatePrivacySettings(
-        isVisible: isVisible,
-        locationEnabled: locationEnabled,
-        shareWorkHistory: shareWorkHistory,
-      );
-      _workerProfile = updatedProfile as WorkerProfile?;
-      notifyListeners();
-    } finally {
-      _setBusy(false);
-    }
-  }
-
-  Future<void> deleteAccount() async {
-    _setBusy(true);
-    try {
-      await _service.workerPreferences.deleteAccount();
-
-      // Clear all local data
-      _currentUser = null;
-      _activeRole = null;
-      _workerProfile = null;
-      _employerProfile = null;
-      await _service.auth.logout();
-      notifyListeners();
-    } finally {
-      _setBusy(false);
-    }
-  }
 }

@@ -1,6 +1,4 @@
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 /// A simple in-memory cache for business logo images
@@ -74,7 +72,7 @@ class ImageCacheService {
       }
       return imageData;
     } finally {
-      _loadingFutures.remove(cleanUrl);
+      await _loadingFutures.remove(cleanUrl);
     }
   }
 

@@ -154,7 +154,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
 
   List<DayAvailability> _defaultAvailability() {
     return [
-      DayAvailability(day: 'Monday'),
+      DayAvailability(day: 'Monda'),
       DayAvailability(day: 'Tuesday'),
       DayAvailability(day: 'Wednesday'),
       DayAvailability(day: 'Thursday'),

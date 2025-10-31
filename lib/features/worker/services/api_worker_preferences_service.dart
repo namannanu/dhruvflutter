@@ -27,8 +27,8 @@ class ApiWorkerPreferencesService {
     bool? availableForTemporary,
     String? weekAvailability,
   }) async {
-    final response = await _client.put(
-      Uri.parse('${_locator.apiUrl}/api/worker/preferences'),
+    final response = await _client.patch(
+      Uri.parse('${_locator.apiUrl}/workers/me'),
       headers: await _getAuthHeaders(),
       body: jsonEncode({
         if (minimumPay != null) 'minimumPay': minimumPay,
@@ -49,7 +49,12 @@ class ApiWorkerPreferencesService {
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     print('Worker preferences update response: $data');
-    final profileData = (data['profile'] ?? data) as Map<String, dynamic>;
+
+    // Extract profile data from the response structure
+    final responseData = data['data'] as Map<String, dynamic>?;
+    final profileData = (responseData?['profile'] ?? responseData ?? data)
+        as Map<String, dynamic>;
+
     return WorkerProfile.fromJson(profileData);
   }
 
@@ -58,8 +63,8 @@ class ApiWorkerPreferencesService {
     bool? locationEnabled,
     bool? shareWorkHistory,
   }) async {
-    final response = await _client.put(
-      Uri.parse('${_locator.apiUrl}/api/worker/privacy'),
+    final response = await _client.patch(
+      Uri.parse('${_locator.apiUrl}/workers/me'),
       headers: await _getAuthHeaders(),
       body: jsonEncode({
         if (isVisible != null) 'isVisible': isVisible,
@@ -73,16 +78,22 @@ class ApiWorkerPreferencesService {
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return WorkerProfile.fromJson(data);
+
+    // Extract profile data from the response structure
+    final responseData = data['data'] as Map<String, dynamic>?;
+    final profileData = (responseData?['profile'] ?? responseData ?? data)
+        as Map<String, dynamic>;
+
+    return WorkerProfile.fromJson(profileData);
   }
 
   Future<void> deleteAccount() async {
     final response = await _client.delete(
-      Uri.parse('${_locator.apiUrl}/api/user/account'),
+      Uri.parse('${_locator.apiUrl}/workers/me'),
       headers: await _getAuthHeaders(),
     );
 
-    if (response.statusCode != 200) {
+    if (response.statusCode != 200 && response.statusCode != 204) {
       throw Exception('Failed to delete account: ${response.body}');
     }
   }

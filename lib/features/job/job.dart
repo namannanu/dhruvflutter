@@ -1,4 +1,4 @@
-// ignore_for_file: require_trailing_commas
+// ignore_for_file: require_trailing_commas, avoid_print
 
 import 'package:flutter/material.dart';
 import '../../core/utils/safe_num.dart';

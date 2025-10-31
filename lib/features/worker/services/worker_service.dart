@@ -18,6 +18,15 @@ abstract class WorkerService {
     bool? notificationsEnabled,
     bool? emailNotificationsEnabled,
     double? preferredRadiusMiles,
+    double? minimumPay,
+    double? maxTravelDistance,
+    bool? availableForFullTime,
+    bool? availableForPartTime,
+    bool? availableForTemporary,
+    String? weekAvailability,
+    bool? isVisible,
+    bool? locationEnabled,
+    bool? shareWorkHistory,
   });
 
   /// Fetch jobs available to a worker

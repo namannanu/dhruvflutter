@@ -228,7 +228,7 @@ class GooglePlacesService {
             '🌐 Web CORS Error: Google Places API blocked by browser. Consider using a proxy server for production.');
 
         // Instead of returning mock data that could cause issues, throw a clear error
-        throw PlacesApiException(
+        throw const PlacesApiException(
           'Google Places API is blocked by browser CORS policy. This feature requires a backend proxy server for web deployment.',
           status: 'CORS_ERROR',
         );

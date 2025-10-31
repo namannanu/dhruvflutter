@@ -9,8 +9,6 @@ import 'package:talent/core/models/models.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/shared/screens/messaging_screen.dart';
 import 'package:talent/features/shared/services/conversation_api_service.dart';
-import 'package:talent/core/widgets/access_tag.dart';
-import 'package:talent/core/services/business_access_context.dart';
 import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 
 class WorkerApplicationsScreen extends StatelessWidget {
@@ -26,8 +24,10 @@ class WorkerApplicationsScreen extends StatelessWidget {
         // Load both applications and jobs so messaging can work
         await Future.wait([
           appState.refreshActiveRole(),
-          if (appState.currentUser != null)
+          if (appState.currentUser != null) ...[
             appState.loadWorkerJobs(appState.currentUser!.id),
+            appState.loadWorkerApplications(appState.currentUser!.id),
+          ],
         ]);
       },
       child: ListView(
@@ -70,10 +70,6 @@ class _ApplicationCard extends StatelessWidget {
     final submittedLabel = DateFormat.yMMMd().format(application.submittedAt);
     final statusColor = _statusColor(context, application.status);
 
-    // Note: Application model doesn't have employer info yet, so accessInfo will be null
-    // TODO: Add employer info to Application model to enable business access tags
-    const BusinessAccessInfo? accessInfo = null;
-
     final statusChip = Container(
       padding: const EdgeInsets.symmetric(
         horizontal: 12,
@@ -92,169 +88,167 @@ class _ApplicationCard extends StatelessWidget {
       ),
     );
 
-    return AccessTagPositioned(
-        accessInfo: accessInfo,
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header row
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final title = Text(
-                      'Application ${application.id.split('-').last}',
-                      style: theme.textTheme.titleMedium,
-                      maxLines: constraints.maxWidth >= 360 ? 1 : 2,
-                      overflow: TextOverflow.ellipsis,
-                    );
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header row
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final title = Text(
+                  'Application ${application.id.split('-').last}',
+                  style: theme.textTheme.titleMedium,
+                  maxLines: constraints.maxWidth >= 360 ? 1 : 2,
+                  overflow: TextOverflow.ellipsis,
+                );
 
-                    if (constraints.maxWidth >= 360) {
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(child: title),
-                          const SizedBox(width: 12),
-                          statusChip,
-                        ],
-                      );
-                    }
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        title,
-                        const SizedBox(height: 8),
-                        statusChip,
-                      ],
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
-
-                // Job info row with business logo and job title
-                if (application.job != null) ...[
-                  Row(
+                if (constraints.maxWidth >= 360) {
+                  return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      BusinessLogoAvatar(
-                        logoUrl: application.job!.businessLogoSquareUrl ??
-                            application.job!.businessLogoUrl ??
-                            application.job!.businessLogoOriginalUrl,
-                        name: application.job!.businessName.isNotEmpty
-                            ? application.job!.businessName
-                            : application.job!.title,
-                        size: 40,
-                      ),
+                      Expanded(child: title),
                       const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              application.job!.title,
-                              style: theme.textTheme.titleMedium,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            if (application.job!.businessName.isNotEmpty)
-                              Text(
-                                application.job!.businessName,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.textTheme.bodySmall?.color,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                          ],
-                        ),
-                      ),
+                      statusChip,
                     ],
+                  );
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    title,
+                    const SizedBox(height: 8),
+                    statusChip,
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+
+            // Job info row with business logo and job title
+            if (application.job != null) ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  BusinessLogoAvatar(
+                    logoUrl: application.job!.businessLogoSquareUrl ??
+                        application.job!.businessLogoUrl ??
+                        application.job!.businessLogoOriginalUrl,
+                    name: application.job!.businessName.isNotEmpty
+                        ? application.job!.businessName
+                        : application.job!.title,
+                    size: 40,
                   ),
-                  const SizedBox(height: 12),
-                ],
-
-                // Submitted date
-                Row(
-                  children: [
-                    const Icon(Icons.calendar_today, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Submitted $submittedLabel',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-
-                // Job details
-                Row(
-                  children: [
-                    const Icon(Icons.work_outline, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        application.job != null
-                            ? 'Job: ${application.job!.title}'
-                            : 'Job ID: ${application.jobId}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-
-                // Additional job info (hourly rate)
-                if (application.job != null) ...[
-                  Row(
-                    children: [
-                      const Icon(Icons.attach_money, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '\$${application.job!.hourlyRate.toStringAsFixed(2)}/hour',
-                          maxLines: 1,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          application.job!.title,
+                          style: theme.textTheme.titleMedium,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ],
+                        if (application.job!.businessName.isNotEmpty)
+                          Text(
+                            application.job!.businessName,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.textTheme.bodySmall?.color,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 8),
                 ],
+              ),
+              const SizedBox(height: 12),
+            ],
 
-                // Note
-                Text(
-                  application.note ?? 'No cover note provided.',
-                  style: theme.textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 16),
-
-                // Actions
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    OutlinedButton(
-                      onPressed: application.status == ApplicationStatus.pending
-                          ? () => _handleWithdraw(context)
-                          : null,
-                      child: const Text('Withdraw'),
-                    ),
-                    OutlinedButton(
-                      onPressed: () => _handleMessageEmployer(context),
-                      child: const Text('Message employer'),
-                    ),
-                  ],
+            // Submitted date
+            Row(
+              children: [
+                const Icon(Icons.calendar_today, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Submitted $submittedLabel',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
-          ),
-        )); // Close AccessTagPositioned
+            const SizedBox(height: 8),
+
+            // Job details
+            Row(
+              children: [
+                const Icon(Icons.work_outline, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    application.job != null
+                        ? 'Job: ${application.job!.title}'
+                        : 'Job ID: ${application.jobId}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Additional job info (hourly rate)
+            if (application.job != null) ...[
+              Row(
+                children: [
+                  const Icon(Icons.attach_money, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '\$${application.job!.hourlyRate.toStringAsFixed(2)}/hour',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+
+            // Note
+            Text(
+              application.note ?? 'No cover note provided.',
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+
+            // Actions
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                OutlinedButton(
+                  onPressed: application.status == ApplicationStatus.pending
+                      ? () => _handleWithdraw(context)
+                      : null,
+                  child: const Text('Withdraw'),
+                ),
+                OutlinedButton(
+                  onPressed: () => _handleMessageEmployer(context),
+                  child: const Text('Message employer'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _handleWithdraw(BuildContext context) async {

@@ -128,8 +128,9 @@ class _NotificationTile extends StatelessWidget {
         color = theme.colorScheme.secondaryContainer;
         break;
       case NotificationType.attendance:
-        // TODO: Handle this case.
-        throw UnimplementedError();
+        icon = Icons.access_time;
+        color = theme.colorScheme.primaryContainer;
+        break;
     }
 
     return Card(

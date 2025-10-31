@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'lib/core/services/google_places_service.dart';
+
 import 'lib/core/models/place.dart';
+import 'lib/core/services/google_places_service.dart';
 
 void main() {
   runApp(const PlaceDetailsTestApp());

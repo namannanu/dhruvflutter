@@ -56,6 +56,15 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     bool? notificationsEnabled,
     bool? emailNotificationsEnabled,
     double? preferredRadiusMiles,
+    double? minimumPay,
+    double? maxTravelDistance,
+    bool? availableForFullTime,
+    bool? availableForPartTime,
+    bool? availableForTemporary,
+    String? weekAvailability,
+    bool? isVisible,
+    bool? locationEnabled,
+    bool? shareWorkHistory,
   }) async {
     final body = <String, dynamic>{};
     if (firstName != null) body['firstName'] = firstName;
@@ -73,6 +82,33 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     }
     if (preferredRadiusMiles != null) {
       body['preferredRadiusMiles'] = preferredRadiusMiles;
+    }
+    if (minimumPay != null) {
+      body['minimumPay'] = minimumPay;
+    }
+    if (maxTravelDistance != null) {
+      body['maxTravelDistance'] = maxTravelDistance;
+    }
+    if (availableForFullTime != null) {
+      body['availableForFullTime'] = availableForFullTime;
+    }
+    if (availableForPartTime != null) {
+      body['availableForPartTime'] = availableForPartTime;
+    }
+    if (availableForTemporary != null) {
+      body['availableForTemporary'] = availableForTemporary;
+    }
+    if (weekAvailability != null) {
+      body['weekAvailability'] = weekAvailability;
+    }
+    if (isVisible != null) {
+      body['isVisible'] = isVisible;
+    }
+    if (locationEnabled != null) {
+      body['locationEnabled'] = locationEnabled;
+    }
+    if (shareWorkHistory != null) {
+      body['shareWorkHistory'] = shareWorkHistory;
     }
 
     if (availability != null) {
@@ -954,7 +990,7 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     required String debugLabel,
   }) async {
     final effectiveQuery = query == null || query.isEmpty ? null : query;
-    final endpoint = '/jobs';
+    const endpoint = '/jobs';
 
     print(
         '🔍 DEBUG: Worker fetching jobs ($debugLabel) with query: $effectiveQuery');
@@ -974,7 +1010,7 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     } else {
       print('✅ DEBUG: Successful API response [$debugLabel]');
       print(
-          '🔍 DEBUG: Response body preview [$debugLabel]: ${response.body.length > 200 ? response.body.substring(0, 200) + '...' : response.body}');
+          '🔍 DEBUG: Response body preview [$debugLabel]: ${response.body.length > 200 ? '${response.body.substring(0, 200)}...' : response.body}',);
     }
 
     final decoded = decodeJson(response);
@@ -1304,6 +1340,72 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
           .where((skill) => skill.isNotEmpty)
           .toList();
 
+      final jobMap = _mapOrNull(json['job']);
+      final employerMap =
+          _mapOrNull(json['employer']) ?? _mapOrNull(jobMap?['employer']);
+      final businessMap =
+          _mapOrNull(json['business']) ?? _mapOrNull(jobMap?['business']);
+
+      String? firstNonEmpty(Iterable<String?> values) {
+        for (final value in values) {
+          final trimmed = value?.trim();
+          if (trimmed != null && trimmed.isNotEmpty) {
+            return trimmed;
+          }
+        }
+        return null;
+      }
+
+      final combinedEmployerName = [
+        _string(employerMap?['firstName'])?.trim(),
+        _string(employerMap?['lastName'])?.trim(),
+      ].whereType<String>().where((part) => part.isNotEmpty).join(' ');
+
+      final legacyCombinedEmployerName = [
+        _string(employerMap?['firstname'])?.trim(),
+        _string(employerMap?['lastname'])?.trim(),
+      ].whereType<String>().where((part) => part.isNotEmpty).join(' ');
+
+      final displayEmployerName =
+          _string(employerMap?['displayName'])?.trim() ?? '';
+
+      final employerEmail = firstNonEmpty([
+        _string(json['employerEmail']),
+        _string(employerMap?['email']),
+        _string(jobMap?['employerEmail']),
+      ]);
+
+      final employerName = firstNonEmpty([
+        combinedEmployerName,
+        legacyCombinedEmployerName,
+        displayEmployerName,
+        _string(employerMap?['name']),
+        _string(json['employerName']),
+        _string(jobMap?['employerName']),
+        employerEmail,
+      ]);
+
+      final employerId = firstNonEmpty([
+        _string(json['employerId']),
+        _string(employerMap?['_id']),
+        _string(employerMap?['id']),
+        _string(jobMap?['employerId']),
+      ]);
+
+      final businessId = firstNonEmpty([
+        _string(json['businessId']),
+        _string(businessMap?['_id']),
+        _string(businessMap?['id']),
+        _string(jobMap?['businessId']),
+      ]);
+
+      final businessName = firstNonEmpty([
+        _string(json['businessName']),
+        _string(businessMap?['businessName']),
+        _string(businessMap?['name']),
+        _string(jobMap?['businessName']),
+      ]);
+
       return Application(
         id: id,
         workerId: workerId,
@@ -1316,6 +1418,11 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         workerName: workerName,
         workerExperience: workerExperience,
         workerSkills: workerSkills,
+        employerId: employerId,
+        employerEmail: employerEmail,
+        employerName: employerName,
+        businessId: businessId,
+        businessName: businessName,
       );
     }
   }
@@ -1391,6 +1498,7 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     switch (value?.toLowerCase()) {
       case 'clocked_in':
       case 'clockedin':
+      case 'clocked-in': // Added support for backend's 'clocked-in' format
         return AttendanceStatus.clockedIn;
       case 'completed':
         return AttendanceStatus.completed;

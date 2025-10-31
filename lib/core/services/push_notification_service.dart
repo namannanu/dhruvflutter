@@ -1,9 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
+
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:talent/core/services/ios_notification_permissions.dart';
+import 'package:talent/core/utils/platform_helper.dart';
 
 class PushNotificationService {
   static final PushNotificationService _instance =
@@ -33,8 +34,8 @@ class PushNotificationService {
     _authToken = authToken;
 
     try {
-      // Request notification permissions on iOS
-      if (Platform.isIOS) {
+      // Request notification permissions on iOS (only when not on web)
+      if (PlatformHelper.isIOS) {
         final hasPermission =
             await IOSNotificationPermissions.requestNotificationPermissions();
         if (!hasPermission) {
@@ -82,14 +83,14 @@ class PushNotificationService {
 
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/api/notifications/register-token'),
+        Uri.parse('$_baseUrl/notifications/register-token'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $_authToken',
         },
         body: jsonEncode({
           'fcmToken': _fcmToken,
-          'platform': defaultTargetPlatform.name,
+          'platform': PlatformHelper.platformName,
         }),
       );
 

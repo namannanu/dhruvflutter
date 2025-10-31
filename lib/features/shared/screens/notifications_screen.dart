@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/communication.dart';
 import 'package:talent/core/state/app_state.dart';
-import 'package:talent/features/shared/screens/notification_preferences_screen.dart';
 import 'package:talent/features/shared/screens/message_notification_test_screen.dart';
+import 'package:talent/features/shared/screens/notification_preferences_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});

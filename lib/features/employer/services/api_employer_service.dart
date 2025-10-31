@@ -672,6 +672,16 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     final id = json['id']?.toString() ?? json['_id']?.toString();
     if (id == null || id.isEmpty) return null;
 
+    String? firstNonEmpty(Iterable<String?> values) {
+      for (final value in values) {
+        final trimmed = value?.trim();
+        if (trimmed != null && trimmed.isNotEmpty) {
+          return trimmed;
+        }
+      }
+      return null;
+    }
+
     final worker = json['worker'];
     String workerName = 'Unknown Worker';
     String workerExperience = '';
@@ -693,12 +703,57 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     }
 
     final job = json['job'];
+    final jobData = _mapOrNull(job);
     String jobId = '';
-    if (job is Map<String, dynamic>) {
-      jobId = job['id']?.toString() ?? job['_id']?.toString() ?? '';
+    if (jobData != null) {
+      jobId = jobData['id']?.toString() ?? jobData['_id']?.toString() ?? '';
     } else if (job is String) {
       jobId = job;
     }
+
+    final employerData = _mapOrNull(json['employer']) ??
+        _mapOrNull(json['employerDetails']) ??
+        _mapOrNull(jobData?['employer']);
+    final businessData = _mapOrNull(json['business']) ??
+        _mapOrNull(json['businessDetails']) ??
+        _mapOrNull(jobData?['business']);
+
+    final employerEmail = firstNonEmpty([
+      _string(json['employerEmail']),
+      _string(employerData?['email']),
+      _string(jobData?['employerEmail']),
+    ]);
+
+    final employerName = firstNonEmpty([
+      _composeName(employerData),
+      _string(json['employerName']),
+      _string(jobData?['employerName']),
+      _string(employerData?['name']),
+      employerEmail,
+    ]);
+
+    final employerId = firstNonEmpty([
+      _extractId(json['employer']),
+      _string(json['employerId']),
+      _string(employerData?['_id']),
+      _string(employerData?['id']),
+      _string(jobData?['employerId']),
+    ]);
+
+    final businessId = firstNonEmpty([
+      _extractId(json['business']),
+      _string(json['businessId']),
+      _string(businessData?['_id']),
+      _string(businessData?['id']),
+      _string(jobData?['businessId']),
+    ]);
+
+    final businessName = firstNonEmpty([
+      _string(json['businessName']),
+      _string(businessData?['businessName']),
+      _string(businessData?['name']),
+      _string(jobData?['businessName']),
+    ]);
 
     return Application(
       id: id,
@@ -711,6 +766,11 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
       submittedAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
       note: json['message']?.toString() ?? json['note']?.toString(),
+      employerId: employerId,
+      employerEmail: employerEmail,
+      employerName: employerName,
+      businessId: businessId,
+      businessName: businessName,
     );
   }
 

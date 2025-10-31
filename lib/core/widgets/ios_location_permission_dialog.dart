@@ -1,3 +1,5 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -89,14 +91,14 @@ class IOSLocationPermissionDialog {
   static Future<void> _requestLocationPermission(BuildContext context) async {
     try {
       // Check if location services are enabled
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         await _showLocationServiceDisabledDialog(context);
         return;
       }
 
       // Request permission
-      LocationPermission permission = await Geolocator.requestPermission();
+      final LocationPermission permission = await Geolocator.requestPermission();
 
       if (permission == LocationPermission.denied) {
         await _showPermissionDeniedDialog(context);

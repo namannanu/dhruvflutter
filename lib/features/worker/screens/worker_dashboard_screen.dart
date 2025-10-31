@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
+import 'package:talent/features/worker/screens/premium_plan_screen.dart';
 import 'package:talent/features/worker/screens/worker_profile_screen_new.dart';
 import 'package:talent/features/worker/screens/worker_settings_screen.dart';
 
@@ -203,18 +204,33 @@ class WorkerDashboardScreen extends StatelessWidget {
 
           _ActionCard(
             title: 'Unlock premium applications',
-            description:
-                'Go unlimited after your 3 free applications each month and access premium job postings.',
+            description: () {
+              final remainingApplications = appState.getRemainingApplications();
+              final isPremium = profile.isPremium;
+
+              if (isPremium) {
+                return 'Premium active - Apply to unlimited jobs and access premium features.';
+              } else if (remainingApplications > 0) {
+                return 'You have $remainingApplications application${remainingApplications == 1 ? '' : 's'} remaining. Go unlimited and access premium job postings.';
+              } else {
+                return 'Application limit reached! Upgrade to continue applying to jobs and access premium postings.';
+              }
+            }(),
             icon: Icons.workspace_premium,
-            buttonLabel: metrics.isPremium ? 'Manage plan' : 'View plans',
-            highlight: !metrics.isPremium,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                      'Premium plans demo — integrate payments to enable.'),
+            buttonLabel: profile.isPremium ? 'Manage plan' : 'View plans',
+            highlight: !profile.isPremium,
+            onTap: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PremiumPlanScreen(),
                 ),
               );
+
+              // Refresh data if premium was activated
+              if (result == true) {
+                await appState.refreshActiveRole();
+              }
             },
           ),
 
