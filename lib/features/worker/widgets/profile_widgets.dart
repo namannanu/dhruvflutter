@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:talent/core/models/user.dart';
+import 'package:talent/features/shared/widgets/profile_picture_avatar.dart';
 
 class ProfileHeader extends StatelessWidget {
   const ProfileHeader({super.key, required this.profile});
@@ -11,27 +12,13 @@ class ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final parts = profile.firstName
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((part) => part.isNotEmpty)
-        .toList();
-    final initials = parts.isEmpty
-        ? '?'
-        : parts.take(2).map((p) => p.substring(0, 1)).join();
-
     return Row(
       children: [
-        CircleAvatar(
-          radius: 40,
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          child: Text(
-            initials,
-            style: Theme.of(context)
-                .textTheme
-                .headlineSmall
-                ?.copyWith(color: Colors.white),
-          ),
+        ProfilePictureAvatar(
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          profilePictureUrl: profile.profilePictureUrl,
+          size: 80,
         ),
         const SizedBox(width: 16),
         Expanded(

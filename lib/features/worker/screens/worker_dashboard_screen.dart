@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/debug_applications_screen.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/worker/screens/premium_plan_screen.dart';
 import 'package:talent/features/worker/screens/worker_profile_screen_new.dart';
@@ -25,6 +26,18 @@ class WorkerDashboardScreen extends StatelessWidget {
         appBar: AppBar(
           title: const Text('Worker Dashboard'),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.bug_report, color: Colors.red),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const DebugApplicationsScreen(),
+                  ),
+                );
+              },
+              tooltip: 'Debug Applications',
+            ),
             IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: () => context.read<AppState>().refreshActiveRole(),

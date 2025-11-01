@@ -32,6 +32,9 @@ class WorkerProfile {
     this.shareWorkHistory,
     this.isPremium = false,
     this.premiumExpiresAt,
+    this.profilePictureUrl,
+    this.profilePictureOriginalUrl,
+    this.profilePictureSquareUrl,
   });
 
   final String id;
@@ -63,6 +66,11 @@ class WorkerProfile {
   final bool? shareWorkHistory;
   final bool isPremium;
   final DateTime? premiumExpiresAt;
+  
+  // Profile picture fields
+  final String? profilePictureUrl;
+  final String? profilePictureOriginalUrl;
+  final String? profilePictureSquareUrl;
 
   WorkerProfile copyWith({
     String? id,
@@ -94,6 +102,9 @@ class WorkerProfile {
     bool? shareWorkHistory,
     bool? isPremium,
     DateTime? premiumExpiresAt,
+    String? profilePictureUrl,
+    String? profilePictureOriginalUrl,
+    String? profilePictureSquareUrl,
   }) {
     return WorkerProfile(
       id: id ?? this.id,
@@ -127,6 +138,9 @@ class WorkerProfile {
       shareWorkHistory: shareWorkHistory ?? this.shareWorkHistory,
       isPremium: isPremium ?? this.isPremium,
       premiumExpiresAt: premiumExpiresAt ?? this.premiumExpiresAt,
+      profilePictureUrl: profilePictureUrl ?? this.profilePictureUrl,
+      profilePictureOriginalUrl: profilePictureOriginalUrl ?? this.profilePictureOriginalUrl,
+      profilePictureSquareUrl: profilePictureSquareUrl ?? this.profilePictureSquareUrl,
     );
   }
 
@@ -273,7 +287,53 @@ class WorkerProfile {
       premiumExpiresAt: payload['premiumExpiresAt'] != null
           ? DateTime.tryParse(payload['premiumExpiresAt'].toString())
           : null,
+      profilePictureUrl: _extractProfilePictureUrl(payload),
+      profilePictureOriginalUrl: _extractProfilePictureOriginalUrl(payload),
+      profilePictureSquareUrl: _extractProfilePictureSquareUrl(payload),
     );
+  }
+
+  // Helper method to extract profile picture URL
+  static String? _extractProfilePictureUrl(Map<String, dynamic> payload) {
+    // Try profilePictureUrl first
+    if (payload['profilePictureUrl'] != null && payload['profilePictureUrl'].toString().trim().isNotEmpty) {
+      return payload['profilePictureUrl'].toString().trim();
+    }
+    
+    // Try nested profilePicture.original.url
+    final profilePicture = payload['profilePicture'];
+    if (profilePicture is Map<String, dynamic>) {
+      final original = profilePicture['original'];
+      if (original is Map<String, dynamic> && original['url'] != null) {
+        return original['url'].toString().trim();
+      }
+    }
+    
+    return null;
+  }
+
+  // Helper method to extract original profile picture URL
+  static String? _extractProfilePictureOriginalUrl(Map<String, dynamic> payload) {
+    final profilePicture = payload['profilePicture'];
+    if (profilePicture is Map<String, dynamic>) {
+      final original = profilePicture['original'];
+      if (original is Map<String, dynamic> && original['url'] != null) {
+        return original['url'].toString().trim();
+      }
+    }
+    return null;
+  }
+
+  // Helper method to extract square profile picture URL
+  static String? _extractProfilePictureSquareUrl(Map<String, dynamic> payload) {
+    final profilePicture = payload['profilePicture'];
+    if (profilePicture is Map<String, dynamic>) {
+      final square = profilePicture['square'];
+      if (square is Map<String, dynamic> && square['url'] != null) {
+        return square['url'].toString().trim();
+      }
+    }
+    return null;
   }
 
   Map<String, dynamic> toJson() {
@@ -307,6 +367,9 @@ class WorkerProfile {
       'shareWorkHistory': shareWorkHistory,
       'isPremium': isPremium,
       'premiumExpiresAt': premiumExpiresAt?.toIso8601String(),
+      if (profilePictureUrl != null) 'profilePictureUrl': profilePictureUrl,
+      if (profilePictureOriginalUrl != null) 'profilePictureOriginalUrl': profilePictureOriginalUrl,
+      if (profilePictureSquareUrl != null) 'profilePictureSquareUrl': profilePictureSquareUrl,
     };
   }
 }

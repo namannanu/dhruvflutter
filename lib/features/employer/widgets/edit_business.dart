@@ -118,9 +118,18 @@ class _EditBusinessState extends State<EditBusiness> {
     try {
       const typeGroup = XTypeGroup(
         label: 'images',
-        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'],
+        // UTIs for iOS
+        uniformTypeIdentifiers: [
+          'public.image',
+          'public.jpeg',
+          'public.png',
+        ],
+        // Extensions for other platforms
+        extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'],
       );
-      final file = await openFile(acceptedTypeGroups: [typeGroup]);
+      final file = await openFile(
+        acceptedTypeGroups: [typeGroup],
+      );
       if (file == null) return;
 
       final bytes = await file.readAsBytes();

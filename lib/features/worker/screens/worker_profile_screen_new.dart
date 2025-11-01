@@ -44,6 +44,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
   final _experienceController = TextEditingController();
   final _skillsController = TextEditingController();
   final _languagesController = TextEditingController();
+  final _profilePictureUrlController = TextEditingController();
   bool _isEditing = false;
 
   // Form state
@@ -73,6 +74,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
     _experienceController.dispose();
     _skillsController.dispose();
     _languagesController.dispose();
+    _profilePictureUrlController.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -88,6 +90,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
       _experienceController.text = profile.experience;
       _skillsController.text = profile.skills.join(', ');
       _languagesController.text = profile.languages.join(', ');
+      _profilePictureUrlController.text = profile.profilePictureUrl ?? '';
       _notificationsEnabled = profile.notificationsEnabled;
 
       final availabilityMaps = profile.availability;
@@ -121,6 +124,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
     final newExperience = _experienceController.text.trim();
     final newSkills = _commaSeparated(_skillsController.text);
     final newLanguages = _commaSeparated(_languagesController.text);
+    final newProfilePictureUrl = _profilePictureUrlController.text.trim();
 
     final availabilityPayload =
         _availability.map((day) => day.toMap()).toList();
@@ -135,6 +139,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
       languages: newLanguages,
       availability: availabilityPayload,
       notificationsEnabled: _notificationsEnabled,
+      profilePictureUrl: newProfilePictureUrl.isEmpty ? null : newProfilePictureUrl,
     );
 
     if (!mounted) return;
@@ -154,7 +159,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
 
   List<DayAvailability> _defaultAvailability() {
     return [
-      DayAvailability(day: 'Monda'),
+      DayAvailability(day: 'Monday'),
       DayAvailability(day: 'Tuesday'),
       DayAvailability(day: 'Wednesday'),
       DayAvailability(day: 'Thursday'),
@@ -224,6 +229,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
                           experienceController: _experienceController,
                           skillsController: _skillsController,
                           languagesController: _languagesController,
+                          profilePictureUrlController: _profilePictureUrlController,
                           availability: _availability,
                           onAvailabilityChanged: (value) {
                             setState(() => _availability = value);

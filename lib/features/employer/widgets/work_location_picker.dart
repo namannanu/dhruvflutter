@@ -139,14 +139,16 @@ class _WorkLocationPickerSheetState extends State<_WorkLocationPickerSheet> {
       const problemLat = 3.1502;
       const problemLng = 101.6144;
       const tolerance = 0.001; // Small tolerance for coordinate comparison
-      
-      final isDangerous = (location.latitude - problemLat).abs() < tolerance && 
-                         (location.longitude - problemLng).abs() < tolerance;
-      
+
+      final isDangerous = (location.latitude - problemLat).abs() < tolerance &&
+          (location.longitude - problemLng).abs() < tolerance;
+
       if (isDangerous) {
-        _log('DANGER: Detected potentially crash-causing coordinates, skipping animation');
-        _log('Problematic coordinates: lat=${location.latitude}, lng=${location.longitude}');
-        
+        _log(
+            'DANGER: Detected potentially crash-causing coordinates, skipping animation');
+        _log(
+            'Problematic coordinates: lat=${location.latitude}, lng=${location.longitude}');
+
         // Show warning to user but don't crash
         if (mounted) {
           _showSnackBar(

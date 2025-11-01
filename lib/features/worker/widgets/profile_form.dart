@@ -1,6 +1,10 @@
 // ignore_for_file: prefer_single_quotes
 
+import 'dart:convert';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:talent/features/shared/widgets/profile_picture_avatar.dart';
 import 'package:talent/features/worker/models/availability.dart';
 
 class EditableProfileForm extends StatelessWidget {
@@ -14,6 +18,7 @@ class EditableProfileForm extends StatelessWidget {
     required this.experienceController,
     required this.skillsController,
     required this.languagesController,
+    required this.profilePictureUrlController,
     required this.availability,
     required this.onAvailabilityChanged,
     required this.notificationsEnabled,
@@ -28,6 +33,7 @@ class EditableProfileForm extends StatelessWidget {
   final TextEditingController experienceController;
   final TextEditingController skillsController;
   final TextEditingController languagesController;
+  final TextEditingController profilePictureUrlController;
   final List<DayAvailability> availability;
   final ValueChanged<List<DayAvailability>> onAvailabilityChanged;
   final bool notificationsEnabled;
@@ -42,6 +48,64 @@ class EditableProfileForm extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          _SectionCard(
+            title: 'Profile picture',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: profilePictureUrlController,
+                        decoration: const InputDecoration(
+                          labelText: 'Profile picture',
+                          hintText: 'Paste URL or upload an image',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ProfilePictureAvatar(
+                      firstName: firstNameController.text.isEmpty
+                          ? 'User'
+                          : firstNameController.text,
+                      lastName: lastNameController.text,
+                      profilePictureUrl: profilePictureUrlController.text.trim().isEmpty
+                          ? null
+                          : profilePictureUrlController.text.trim(),
+                      size: 56,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => _pickProfilePicture(context),
+                      icon: const Icon(Icons.file_upload_outlined),
+                      label: const Text('Upload image'),
+                    ),
+                    if (profilePictureUrlController.text.trim().isNotEmpty)
+                      TextButton.icon(
+                        onPressed: () => profilePictureUrlController.clear(),
+                        icon: const Icon(Icons.clear),
+                        label: const Text('Clear'),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'You can paste an image URL or upload a PNG, JPG, WEBP file. Uploaded images are converted to a data URL for storage.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
           _SectionCard(
             title: 'Personal information',
             child: Column(
@@ -170,6 +234,62 @@ class EditableProfileForm extends StatelessWidget {
       return 'Enter a valid phone number';
     }
     return null;
+  }
+
+  // Helper method to pick profile picture
+  void _pickProfilePicture(BuildContext context) async {
+    try {
+      const typeGroup = XTypeGroup(
+        label: 'images',
+        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'],
+      );
+      final file = await openFile(acceptedTypeGroups: [typeGroup]);
+      if (file == null) return;
+
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Selected image is empty.')),
+          );
+        }
+        return;
+      }
+
+      final mime = file.mimeType ?? _lookupMimeType(file.name);
+      final dataUrl = 'data:$mime;base64,${base64Encode(bytes)}';
+      
+      profilePictureUrlController.text = dataUrl;
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick image: $error')),
+        );
+      }
+    }
+  }
+
+  static String _lookupMimeType(String? nameOrExtension) {
+    if (nameOrExtension == null || nameOrExtension.isEmpty) {
+      return 'image/png';
+    }
+    final lower = nameOrExtension.toLowerCase();
+    final ext = lower.contains('.') ? lower.split('.').last : lower;
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'webp':
+        return 'image/webp';
+      case 'gif':
+        return 'image/gif';
+      case 'bmp':
+        return 'image/bmp';
+      case 'svg':
+        return 'image/svg+xml';
+      default:
+        return 'image/png';
+    }
   }
 }
 

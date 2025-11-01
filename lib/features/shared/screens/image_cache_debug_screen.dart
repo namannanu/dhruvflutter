@@ -64,15 +64,19 @@ class _ImageCacheDebugScreenState extends State<ImageCacheDebugScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    _buildStatRow('Cached Images', '${_cacheStats['cachedImages'] ?? 0}'),
-                    _buildStatRow('Loading Images', '${_cacheStats['loadingImages'] ?? 0}'),
-                    _buildStatRow('Max Cache Size', '${_cacheStats['maxCacheSize'] ?? 0}'),
+                    _buildStatRow(
+                        'Cached Images', '${_cacheStats['cachedImages'] ?? 0}'),
+                    _buildStatRow('Loading Images',
+                        '${_cacheStats['loadingImages'] ?? 0}'),
+                    _buildStatRow('Max Cache Size',
+                        '${_cacheStats['maxCacheSize'] ?? 0}'),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            if (_cacheStats['cacheUrls'] != null && (_cacheStats['cacheUrls'] as List).isNotEmpty) ...[
+            if (_cacheStats['cacheUrls'] != null &&
+                (_cacheStats['cacheUrls'] as List).isNotEmpty) ...[
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),

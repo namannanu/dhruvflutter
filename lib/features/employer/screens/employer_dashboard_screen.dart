@@ -1,4 +1,4 @@
-// ignore_for_file: use_build_context_synchronously
+// ignore_for_file: use_build_context_synchronously, avoid_print
 
 import 'dart:convert';
 
@@ -338,6 +338,8 @@ class _AddBusinessState extends State<_AddBusiness> {
   final _logoUrlController = TextEditingController();
 
   PlaceDetails? _selectedPlace;
+  double? _selectedRadiusMeters;
+  String? _selectedLocationNotes;
   bool _submitting = false;
 
   @override
@@ -383,9 +385,10 @@ class _AddBusinessState extends State<_AddBusiness> {
         longitude: _selectedPlace?.longitude,
         placeId: _selectedPlace?.placeId,
         formattedAddress: _selectedPlace?.formattedAddress,
-        allowedRadius: 150.0, // Default 150 meters radius
+        allowedRadius:
+            _selectedPlace != null ? (_selectedRadiusMeters ?? 150.0) : null,
         locationName: _selectedPlace?.name,
-        locationNotes: null, // Could add a notes field later
+        locationNotes: _selectedPlace != null ? _selectedLocationNotes : null,
       );
 
       if (!mounted) return;
@@ -413,14 +416,39 @@ class _AddBusinessState extends State<_AddBusiness> {
 
   Future<void> _pickLogo() async {
     try {
+      // Show dialog to indicate file picker is about to open
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Opening file picker...')),
+      );
+
       const typeGroup = XTypeGroup(
         label: 'images',
-        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'],
+        // UTIs for iOS
+        uniformTypeIdentifiers: [
+          'public.image',
+          'public.jpeg',
+          'public.png',
+        ],
+        // Extensions for other platforms
+        // ignore: unnecessary_const
+        extensions: const ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'],
       );
-      final file = await openFile(acceptedTypeGroups: [typeGroup]);
-      if (file == null) return;
+
+      final file = await openFile(
+        acceptedTypeGroups: [typeGroup],
+      );
+      if (file == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No file selected')),
+        );
+        return;
+      }
+
+      print('File selected: ${file.name}'); // Debug log
 
       final bytes = await file.readAsBytes();
+      print('File size: ${bytes.length} bytes'); // Debug log
+
       if (bytes.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Selected image is empty.')),
@@ -433,9 +461,27 @@ class _AddBusinessState extends State<_AddBusiness> {
       setState(() {
         _logoUrlController.text = dataUrl;
       });
-    } catch (error) {
+    } catch (error, stackTrace) {
+      print('Error picking logo: $error'); // Debug log
+      print('Stack trace: $stackTrace'); // Debug log
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to pick image: $error')),
+        SnackBar(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Failed to pick image'),
+              Text(
+                error.toString(),
+                style: Theme.of(context).textTheme.bodySmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 5),
+        ),
       );
     }
   }
@@ -463,9 +509,15 @@ class _AddBusinessState extends State<_AddBusiness> {
     }
   }
 
-  void _applyPlaceDetails(PlaceDetails place) {
+  void _applyPlaceDetails(
+    PlaceDetails place, {
+    double? allowedRadius,
+    String? notes,
+  }) {
     setState(() {
       _selectedPlace = place;
+      _selectedRadiusMeters = allowedRadius ?? _selectedRadiusMeters ?? 150.0;
+      _selectedLocationNotes = notes;
     });
 
     final street = place.streetAddress ?? place.formattedAddress;
@@ -494,10 +546,16 @@ class _AddBusinessState extends State<_AddBusiness> {
     final result = await showWorkLocationPicker(
       context,
       initialPlace: _selectedPlace,
+      initialRadiusMeters: _selectedRadiusMeters ?? 150.0,
+      initialNotes: _selectedLocationNotes,
     );
 
     if (result != null) {
-      _applyPlaceDetails(result.place);
+      _applyPlaceDetails(
+        result.place,
+        allowedRadius: result.allowedRadius,
+        notes: result.notes,
+      );
     }
   }
 
@@ -561,10 +619,32 @@ class _AddBusinessState extends State<_AddBusiness> {
                               .colorScheme
                               .primaryContainer
                               .withValues(alpha: 0.2),
-                          child: ListTile(
-                            leading: const Icon(Icons.place_outlined),
-                            title: Text(_selectedPlace!.name),
-                            subtitle: Text(_selectedPlace!.formattedAddress),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.place_outlined),
+                                title: Text(_selectedPlace!.name),
+                                subtitle:
+                                    Text(_selectedPlace!.formattedAddress),
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.social_distance),
+                                title: const Text('Allowed radius'),
+                                subtitle: Text(
+                                  '${(_selectedRadiusMeters ?? 150.0).toStringAsFixed(0)} meters',
+                                ),
+                              ),
+                              if (_selectedLocationNotes != null &&
+                                  _selectedLocationNotes!.isNotEmpty)
+                                ListTile(
+                                  leading:
+                                      const Icon(Icons.sticky_note_2_outlined),
+                                  title: const Text('Location notes'),
+                                  subtitle: Text(_selectedLocationNotes!),
+                                ),
+                            ],
                           ),
                         ),
                         const SizedBox(height: 12),

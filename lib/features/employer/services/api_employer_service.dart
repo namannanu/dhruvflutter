@@ -321,7 +321,7 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
       createdById: createdById,
       createdByTag: createdByTag,
       createdByEmail: createdByEmail,
-      createdByName: createdByName,
+      createdByName: createdByName, businessAddress: '',
     );
   }
 

@@ -52,6 +52,7 @@ class JobPosting {
     this.publishedById,
     this.publishedByName,
     this.publishedByEmail,
+    required this.businessAddress,
   });
 
   final String id;
@@ -77,6 +78,7 @@ class JobPosting {
 
   final int applicantsCount;
   final String businessName;
+  final String businessAddress;
   final String? businessLogoUrl;
   final String? businessLogoOriginalUrl;
   final String? businessLogoSquareUrl;
@@ -216,6 +218,9 @@ class JobPosting {
         businessDetails?['businessName']?.toString() ??
         businessDetails?['name']?.toString() ??
         '';
+    final businessAddress = json['businessAddress']?.toString() ??
+        businessDetails?['address']?.toString() ??
+        '';
     String? businessLogoUrl = json['businessLogoUrl']?.toString();
     String? businessLogoOriginalUrl;
     String? businessLogoSquareUrl;
@@ -350,6 +355,7 @@ class JobPosting {
       publishedById: publishedById,
       publishedByName: publishedByName,
       publishedByEmail: publishedByEmail,
+      businessAddress: businessAddress,
     );
   }
 
@@ -377,6 +383,7 @@ class JobPosting {
       'locationSummary': locationSummary,
       'applicantsCount': applicantsCount,
       'businessName': businessName,
+      'businessAddress': businessAddress,
       'businessLogoUrl': businessLogoUrl,
       if (businessLogoOriginalUrl != null)
         'businessLogoOriginalUrl': businessLogoOriginalUrl,

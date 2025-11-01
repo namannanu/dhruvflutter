@@ -18,7 +18,10 @@ abstract class AuthService {
   bool get isInitializing;
 
   /// Logs in a user with email and password.
-  Future<User> login({
+  /// Returns a tuple of (User?, String) where:
+  /// - User? is the logged in user or null if login failed
+  /// - String is a message indicating success or the error reason
+  Future<(User?, String)> login({
     required String email,
     required String password,
     String? type,

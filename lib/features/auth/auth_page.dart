@@ -5,7 +5,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/user.dart';
-import 'package:talent/core/services/exceptions.dart';
 import 'package:talent/core/state/app_state.dart';
 
 class AuthPage extends StatefulWidget {
@@ -106,17 +105,20 @@ class _SignInFormState extends State<_SignInForm> {
                   : () async {
                       if (_formKey.currentState?.validate() ?? false) {
                         try {
-                          await context.read<AppState>().login(
+                          final message = await context.read<AppState>().login(
                                 email: _emailController.text,
                                 password: _passwordController.text,
                               );
-                        } on ApiException catch (error) {
+
                           if (!mounted) return;
-                          final message = error.message.isNotEmpty
-                              ? error.message
-                              : 'The server rejected the request (${error.statusCode}).';
+
+                          final isSuccess = message == 'Login successful';
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(message)),
+                            SnackBar(
+                              content: Text(message),
+                              backgroundColor:
+                                  isSuccess ? Colors.green : Colors.red,
+                            ),
                           );
                         } on HandshakeException catch (_) {
                           if (!mounted) return;
@@ -228,13 +230,13 @@ class _SignUpFormState extends State<_SignUpForm> {
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 32),
-
             DropdownButtonFormField<UserType>(
               value: _selectedType,
               decoration: const InputDecoration(labelText: 'I am a'),
               items: const [
                 DropdownMenuItem(value: UserType.worker, child: Text('Worker')),
-                DropdownMenuItem(value: UserType.employer, child: Text('Employer')),
+                DropdownMenuItem(
+                    value: UserType.employer, child: Text('Employer')),
               ],
               onChanged: (value) {
                 if (value != null) {
@@ -243,23 +245,22 @@ class _SignUpFormState extends State<_SignUpForm> {
               },
             ),
             const SizedBox(height: 16),
-
             TextFormField(
               controller: _firstnameController,
               decoration: const InputDecoration(labelText: 'First name'),
-              validator: (value) =>
-                  value == null || value.isEmpty ? 'Enter your first name' : null,
+              validator: (value) => value == null || value.isEmpty
+                  ? 'Enter your first name'
+                  : null,
             ),
             const SizedBox(height: 16),
-            
             TextFormField(
               controller: _lastnameController,
               decoration: const InputDecoration(labelText: 'Last name'),
-              validator: (value) =>
-                  value == null || value.isEmpty ? 'Enter your last name' : null,
-            ), 
+              validator: (value) => value == null || value.isEmpty
+                  ? 'Enter your last name'
+                  : null,
+            ),
             const SizedBox(height: 16),
-
             TextFormField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
@@ -268,7 +269,6 @@ class _SignUpFormState extends State<_SignUpForm> {
                   value == null || value.isEmpty ? 'Enter your email' : null,
             ),
             const SizedBox(height: 16),
-
             TextFormField(
               controller: _passwordController,
               obscureText: _obscurePassword,
@@ -297,7 +297,6 @@ class _SignUpFormState extends State<_SignUpForm> {
               },
             ),
             const SizedBox(height: 16),
-
             ElevatedButton.icon(
               onPressed: appState.isBusy
                   ? null

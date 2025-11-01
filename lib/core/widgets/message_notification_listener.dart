@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:talent/core/models/communication.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/features/shared/screens/messaging_screen.dart';
 
@@ -39,7 +40,8 @@ class _MessageNotificationListenerState
   }
 
   void _showMessageNotificationDialog(
-      BuildContext context, Map<String, dynamic> notification) {
+      BuildContext context, Map<String, dynamic> notificationData) {
+    final notification = AppNotification.fromJson(notificationData);
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -73,7 +75,7 @@ class _MessageNotificationListenerState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            (notification['title'] as String?) ?? 'New Message',
+                            notification.title,
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
@@ -81,7 +83,7 @@ class _MessageNotificationListenerState
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'From ${(notification['senderName'] as String?) ?? 'Someone'}',
+                            'From ${notification.data['senderName'] ?? 'Someone'}',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey[600],
@@ -104,7 +106,7 @@ class _MessageNotificationListenerState
                     ),
                   ),
                   child: Text(
-                    (notification['body'] as String?) ?? '',
+                    notification.message,
                     style: const TextStyle(fontSize: 14),
                   ),
                 ),

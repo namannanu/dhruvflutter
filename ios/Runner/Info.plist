@@ -18,6 +18,10 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(FLUTTER_BUILD_NAME)</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>We need access to photo library to select business logo images.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>We need camera access to capture business logo images.</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>

@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import UserNotifications
+import GoogleMaps
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -9,6 +10,14 @@ import UserNotifications
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     GeneratedPluginRegistrant.register(with: self)
+
+    if let apiKey = Bundle.main.object(forInfoDictionaryKey: "GMSApiKey") as? String,
+       !apiKey.isEmpty {
+      GMSServices.provideAPIKey(apiKey)
+      NSLog("✅ Google Maps API key configured successfully")
+    } else {
+      NSLog("⚠️ Google Maps API key missing. Add GMSApiKey to Info.plist or configure it in AppDelegate.")
+    }
     
     // Configure push notifications
     if #available(iOS 10.0, *) {

@@ -118,7 +118,7 @@ class ApiAuthService implements AuthService {
   bool get isInitializing => !_isInitialized;
 
   @override
-  Future<User> login({
+  Future<(User?, String)> login({
     required String email,
     required String password,
     String? type,
@@ -157,13 +157,14 @@ class ApiAuthService implements AuthService {
         if (apiType != null) apiType,
         if (requestedType != null) requestedType,
       };
-      final selectedBusinessId =
-          _resolveSelectedBusinessId(userData, authData);
+      final selectedBusinessId = _resolveSelectedBusinessId(userData, authData);
       final ownedBusinesses = BusinessAssociation.parseList(
-        (authData?['ownedBusinesses'] ?? userData['ownedBusinesses']) as List<dynamic>?,
+        (authData?['ownedBusinesses'] ?? userData['ownedBusinesses'])
+            as List<dynamic>?,
       );
       final teamBusinesses = BusinessAssociation.parseList(
-        (authData?['teamBusinesses'] ?? userData['teamBusinesses']) as List<dynamic>?,
+        (authData?['teamBusinesses'] ?? userData['teamBusinesses'])
+            as List<dynamic>?,
       );
 
       final user = User(
@@ -189,9 +190,15 @@ class ApiAuthService implements AuthService {
         workerProfileJson: workerProfileJson,
         metricsJson: metricsJson,
       );
-      return user;
+      return (user, 'Login successful');
     } catch (error) {
-      throw Exception('Login failed: ${error.toString()}');
+      if (error.toString().contains('401')) {
+        return (null, 'Invalid email or password');
+      } else if (error.toString().contains('offline') ||
+          error.toString().contains('network')) {
+        return (null, 'Network error. Please check your connection');
+      }
+      return (null, 'Login failed: ${error.toString()}');
     }
   }
 
@@ -237,8 +244,7 @@ class ApiAuthService implements AuthService {
         if (apiType != null) apiType,
         requestedType,
       };
-      final selectedBusinessId =
-          _resolveSelectedBusinessId(userData, authData);
+      final selectedBusinessId = _resolveSelectedBusinessId(userData, authData);
       final ownedBusinesses = BusinessAssociation.parseList(
         (authData?['ownedBusinesses'] as List<dynamic>?) ??
             (userData['ownedBusinesses'] as List<dynamic>?),
@@ -350,8 +356,9 @@ class ApiAuthService implements AuthService {
     _authStateController.add(true);
 
     try {
-      final ownedBusinesses = rawAuthData?['ownedBusinesses'] as List<dynamic>? ??
-          user.ownedBusinesses.map((b) => b.toJson()).toList();
+      final ownedBusinesses =
+          rawAuthData?['ownedBusinesses'] as List<dynamic>? ??
+              user.ownedBusinesses.map((b) => b.toJson()).toList();
       final teamBusinesses = rawAuthData?['teamBusinesses'] as List<dynamic>? ??
           user.teamBusinesses.map((b) => b.toJson()).toList();
 
@@ -422,8 +429,10 @@ class ApiAuthService implements AuthService {
       return candidate;
     }
 
-    candidate = _extractBusinessIdFromCollection(authPayload?['ownedBusinesses']);
-    candidate ??= _extractBusinessIdFromCollection(authPayload?['teamBusinesses']);
+    candidate =
+        _extractBusinessIdFromCollection(authPayload?['ownedBusinesses']);
+    candidate ??=
+        _extractBusinessIdFromCollection(authPayload?['teamBusinesses']);
     candidate ??= _extractBusinessId(authPayload?['employerProfile']);
 
     return candidate;
@@ -463,7 +472,13 @@ class ApiAuthService implements AuthService {
     }
 
     if (entry is Map<String, dynamic>) {
-      const directKeys = ['businessId', 'selectedBusiness', 'selectedBusinessId', 'id', '_id'];
+      const directKeys = [
+        'businessId',
+        'selectedBusiness',
+        'selectedBusinessId',
+        'id',
+        '_id'
+      ];
       for (final key in directKeys) {
         final value = entry[key];
         if (value != null) {

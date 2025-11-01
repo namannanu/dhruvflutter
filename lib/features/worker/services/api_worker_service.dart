@@ -65,6 +65,7 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     bool? isVisible,
     bool? locationEnabled,
     bool? shareWorkHistory,
+    String? profilePictureUrl,
   }) async {
     final body = <String, dynamic>{};
     if (firstName != null) body['firstName'] = firstName;
@@ -110,13 +111,10 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     if (shareWorkHistory != null) {
       body['shareWorkHistory'] = shareWorkHistory;
     }
-
-    if (availability != null) {
-      body['availability'] = availability
-          .map(_normalizeAvailabilityDay)
-          .whereType<Map<String, dynamic>>()
-          .toList();
+    if (profilePictureUrl != null) {
+      body['profilePictureUrl'] = profilePictureUrl;
     }
+
 
     final response = await client.patch(
       resolveWithQuery('/workers/me'),
@@ -159,68 +157,8 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         .toList();
   }
 
-  Map<String, dynamic>? _normalizeAvailabilityDay(Map<String, dynamic> day) {
-    final dayName = day['day']?.toString();
-    if (dayName == null) {
-      return null;
-    }
 
-    final normalizedDay = dayName.toLowerCase();
-    const allowedDays = [
-      'monday',
-      'tuesday',
-      'wednesday',
-      'thursday',
-      'friday',
-      'saturday',
-      'sunday',
-    ];
-    if (!allowedDays.contains(normalizedDay)) {
-      return null;
-    }
 
-    final isAvailableRaw =
-        day['isAvailable'] ?? day['available'] ?? day['active'];
-    final isAvailable = _coerceBool(isAvailableRaw);
-
-    final slotsRaw = day['timeSlots'];
-    final slots = <Map<String, String>>[];
-    if (slotsRaw is List) {
-      for (final slot in slotsRaw) {
-        if (slot is Map) {
-          final start = slot['startTime']?.toString();
-          final end = slot['endTime']?.toString();
-          if (_isValidTime(start) && _isValidTime(end)) {
-            slots.add({'startTime': start!, 'endTime': end!});
-          }
-        }
-      }
-    }
-
-    return <String, dynamic>{
-      'day': normalizedDay,
-      'isAvailable': isAvailable,
-      'timeSlots': slots,
-    };
-  }
-
-  bool _coerceBool(dynamic value) {
-    if (value is bool) return value;
-    if (value is num) return value != 0;
-    if (value is String) {
-      final normalized = value.toLowerCase();
-      return normalized == 'true' ||
-          normalized == '1' ||
-          normalized == 'yes' ||
-          normalized == 'available';
-    }
-    return false;
-  }
-
-  bool _isValidTime(String? value) {
-    if (value == null) return false;
-    return RegExp(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$').hasMatch(value);
-  }
 
   Map<String, dynamic> _extractProfilePayload(Map<String, dynamic> json) {
     Map<String, dynamic>? asMap(dynamic value) {
@@ -1217,6 +1155,7 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         businessLogoSquareUrl: businessLogoSquareUrl,
         isPublished: isPublished,
         publishStatus: publishStatus,
+        businessAddress: '',
       );
     } catch (e, stackTrace) {
       print('ERROR: Failed to parse job posting: $e');

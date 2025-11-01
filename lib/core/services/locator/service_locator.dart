@@ -13,6 +13,7 @@ import 'package:talent/features/job/services/api_job_service.dart';
 import 'package:talent/features/messaging/services/api_messaging_service.dart';
 import 'package:talent/features/shift/services/api_shift_service.dart';
 import 'package:talent/features/worker/services/api_worker_service.dart';
+import 'package:talent/features/worker/services/api_worker_preferences_service.dart';
 import 'package:talent/services/auth_token_manager.dart';
 
 import '../cache/worker_cache_repository.dart';
@@ -72,6 +73,7 @@ class ServiceLocator {
 
   late ApiAuthService auth;
   late ApiWorkerService worker;
+  late ApiWorkerPreferencesService workerPreferences;
   late ApiEmployerService employer;
   late ApiBusinessService business;
   late ApiJobService job;
@@ -92,6 +94,8 @@ class ServiceLocator {
       enableLogging: _enableLogging,
       cache: workerCache,
     );
+
+    workerPreferences = ApiWorkerPreferencesService(this);
 
     employer = ApiEmployerService(
       baseUrl: _baseUrl,

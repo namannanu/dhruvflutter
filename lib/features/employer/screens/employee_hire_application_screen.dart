@@ -75,7 +75,9 @@ class _EmployeeHireApplicationScreenState
 
   @override
   Widget build(BuildContext context) {
-    final applications = context.watch<AppState>().employerApplications;
+    final appState = context.watch<AppState>();
+    final applications = appState.employerApplications;
+    final applicationsError = appState.employerApplicationsError;
     final filtered = _statusFilter == null
         ? applications
         : applications
@@ -114,6 +116,7 @@ class _EmployeeHireApplicationScreenState
               child: _EmptyApplicationsMessage(
                 isLoading: _isLoading,
                 filterActive: _statusFilter != null,
+                error: applicationsError,
               ),
             )
           else
@@ -173,16 +176,46 @@ class _EmptyApplicationsMessage extends StatelessWidget {
   const _EmptyApplicationsMessage({
     required this.isLoading,
     required this.filterActive,
+    this.error,
   });
 
   final bool isLoading;
   final bool filterActive;
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
       return const Center(
         child: CircularProgressIndicator(),
+      );
+    }
+
+    if (error != null && error!.isNotEmpty) {
+      return Material(
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline, size: 48),
+                const SizedBox(height: 12),
+                Text(
+                  'Access restricted',
+                  style: Theme.of(context).textTheme.titleMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  error!,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
 

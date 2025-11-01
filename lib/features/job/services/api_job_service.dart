@@ -629,6 +629,7 @@ class ApiJobService extends BaseApiService implements JobService {
       createdByTag: createdByTag,
       createdByEmail: createdByEmail,
       createdByName: createdByName,
+      businessAddress: '',
     );
   }
 

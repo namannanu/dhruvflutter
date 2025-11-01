@@ -22,7 +22,8 @@ class CachedNetworkImageWidget extends StatefulWidget {
   final Widget Function(BuildContext, Object, StackTrace?)? errorBuilder;
 
   @override
-  State<CachedNetworkImageWidget> createState() => _CachedNetworkImageWidgetState();
+  State<CachedNetworkImageWidget> createState() =>
+      _CachedNetworkImageWidgetState();
 }
 
 class _CachedNetworkImageWidgetState extends State<CachedNetworkImageWidget> {

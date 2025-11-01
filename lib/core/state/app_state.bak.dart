@@ -73,10 +73,10 @@ class AppState extends ChangeNotifier {
   }) async {
     _setBusy(true);
     try {
-      _currentUser = await _service.auth.login(
+      _currentUser = (await _service.auth.login(
         email: email,
         password: password,
-      );
+      )) as User?;
       _activeRole = _currentUser?.type;
       _service.updateAuthToken(_service.auth.authToken);
 

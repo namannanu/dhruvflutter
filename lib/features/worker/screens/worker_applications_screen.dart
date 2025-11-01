@@ -428,6 +428,7 @@ class _ApplicationCard extends StatelessWidget {
           premiumRequired: false,
           applicantsCount: 0,
           businessName: '',
+          businessAddress: '',
         );
       }
 

@@ -9,28 +9,27 @@ class ImageCacheService {
 
   // Cache map: URL -> cached image data
   final Map<String, Uint8List> _cache = {};
-  
+
   // Loading state map: URL -> Future to prevent duplicate requests
   final Map<String, Future<Uint8List?>> _loadingFutures = {};
-  
+
   // Maximum cache size (number of images)
   static const int _maxCacheSize = 100;
-  
+
   // Maximum age for cached images (24 hours)
   static const Duration _maxAge = Duration(hours: 24);
-  
+
   // Cache timestamps to implement expiry
   final Map<String, DateTime> _cacheTimestamps = {};
 
   /// Get cached image data for a URL
   Uint8List? getCachedImage(String url) {
     final cleanUrl = url.trim();
-    
+
     // Check if image is cached and not expired
     if (_cache.containsKey(cleanUrl)) {
       final timestamp = _cacheTimestamps[cleanUrl];
-      if (timestamp != null && 
-          DateTime.now().difference(timestamp) < _maxAge) {
+      if (timestamp != null && DateTime.now().difference(timestamp) < _maxAge) {
         debugPrint('📸 ImageCache: Cache HIT for $cleanUrl');
         return _cache[cleanUrl];
       } else {
@@ -39,7 +38,7 @@ class ImageCacheService {
         debugPrint('📸 ImageCache: Cache EXPIRED for $cleanUrl');
       }
     }
-    
+
     debugPrint('📸 ImageCache: Cache MISS for $cleanUrl');
     return null;
   }
@@ -47,28 +46,29 @@ class ImageCacheService {
   /// Load and cache image from URL
   Future<Uint8List?> loadAndCacheImage(String url) async {
     final cleanUrl = url.trim();
-    
+
     // Check if already cached
     final cached = getCachedImage(cleanUrl);
     if (cached != null) {
       return cached;
     }
-    
+
     // Check if already loading
     if (_loadingFutures.containsKey(cleanUrl)) {
       debugPrint('📸 ImageCache: Already loading $cleanUrl');
       return await _loadingFutures[cleanUrl];
     }
-    
+
     // Start loading
     final loadingFuture = _downloadImage(cleanUrl);
     _loadingFutures[cleanUrl] = loadingFuture;
-    
+
     try {
       final imageData = await loadingFuture;
       if (imageData != null) {
         _addToCache(cleanUrl, imageData);
-        debugPrint('📸 ImageCache: Cached new image for $cleanUrl (${imageData.length} bytes)');
+        debugPrint(
+            '📸 ImageCache: Cached new image for $cleanUrl (${imageData.length} bytes)');
       }
       return imageData;
     } finally {
@@ -86,7 +86,7 @@ class ImageCacheService {
           'User-Agent': 'Talent App/1.0',
         },
       ).timeout(const Duration(seconds: 10));
-      
+
       if (response.statusCode == 200) {
         final contentType = response.headers['content-type'] ?? '';
         if (contentType.startsWith('image/')) {
@@ -114,7 +114,7 @@ class ImageCacheService {
       _removeFromCache(oldestEntry.key);
       debugPrint('📸 ImageCache: Evicted old entry ${oldestEntry.key}');
     }
-    
+
     _cache[url] = imageData;
     _cacheTimestamps[url] = DateTime.now();
   }

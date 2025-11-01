@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/features/shared/widgets/profile_picture_avatar.dart';
 
 class EmployerWorkerProfileScreen extends StatefulWidget {
   const EmployerWorkerProfileScreen({super.key, required this.application});
@@ -165,6 +166,9 @@ class _EmployerWorkerProfileScreenState
                       completedJobs: completedJobs,
                       verified: verified,
                       submittedLabel: submittedLabel,
+                      firstName: profile?.firstName ?? workerUser?.firstName,
+                      lastName: profile?.lastName ?? workerUser?.lastName,
+                      profilePictureUrl: profile?.profilePictureUrl,
                     ),
                     const SizedBox(height: 16),
                     _ExperienceCard(experience: experience, bio: bio),
@@ -248,6 +252,9 @@ class _SummaryCard extends StatelessWidget {
     required this.completedJobs,
     required this.verified,
     required this.submittedLabel,
+    this.firstName,
+    this.lastName,
+    this.profilePictureUrl,
   });
 
   final String fullName;
@@ -258,6 +265,9 @@ class _SummaryCard extends StatelessWidget {
   final int? completedJobs;
   final bool verified;
   final String submittedLabel;
+  final String? firstName;
+  final String? lastName;
+  final String? profilePictureUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -315,9 +325,11 @@ class _SummaryCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  radius: 32,
-                  child: Text(_initials(fullName)),
+                ProfilePictureAvatar(
+                  firstName: firstName ?? fullName.split(' ').first,
+                  lastName: lastName ?? (fullName.split(' ').length > 1 ? fullName.split(' ').last : ''),
+                  profilePictureUrl: profilePictureUrl,
+                  size: 64,
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -356,14 +368,6 @@ class _SummaryCard extends StatelessWidget {
     );
   }
 
-  static String _initials(String value) {
-    final parts = value.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty) return '?';
-    final first = parts.first.isNotEmpty ? parts.first[0] : '';
-    final last = parts.length > 1 && parts.last.isNotEmpty ? parts.last[0] : '';
-    final initials = (first + last).trim();
-    return initials.isEmpty ? '?' : initials.toUpperCase();
-  }
 }
 
 class _ExperienceCard extends StatelessWidget {

@@ -27,6 +27,7 @@ abstract class WorkerService {
     bool? isVisible,
     bool? locationEnabled,
     bool? shareWorkHistory,
+    String? profilePictureUrl,
   });
 
   /// Fetch jobs available to a worker

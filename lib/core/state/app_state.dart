@@ -11,16 +11,21 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:talent/core/config/environment_config.dart';
 import 'package:talent/core/config/payment_config.dart';
 import 'package:talent/core/models/models.dart';
+import 'package:talent/core/services/base/base_api_service.dart';
 import 'package:talent/core/services/business_access_context.dart';
 import 'package:talent/core/services/location_service.dart';
 import 'package:talent/core/services/locator/service_locator.dart';
 import 'package:talent/core/services/push_notification_service.dart';
 import 'package:talent/core/services/user_permissions_service.dart';
+import 'package:talent/services/auth_token_manager.dart';
 
 part 'payment_extensions.dart';
 
 class AppState extends ChangeNotifier {
-  AppState(this._service);
+  AppState(this._service) {
+    // Automatically check for stored authentication when AppState is created
+    _checkStoredAuthentication();
+  }
 
   final ServiceLocator _service;
   final UserPermissionsService _userPermissionsService =
@@ -50,6 +55,7 @@ class AppState extends ChangeNotifier {
   AnalyticsSummary? _analyticsSummary;
   final List<AttendanceRecord> _employerAttendance = [];
   List<Application> _employerApplications = [];
+  String? _employerApplicationsError;
   TeamMember? _currentUserTeamMember;
   List<String> _currentUserPermissions = <String>[];
   String? _currentUserPermissionsBusinessId;
@@ -79,6 +85,82 @@ class AppState extends ChangeNotifier {
   late Razorpay _razorpay;
   Completer<void>? _paymentCompleter;
   _PendingJobPayment? _pendingJobPayment;
+
+  // ================== Authentication Initialization ==================
+
+  /// Automatically check for stored authentication when app starts
+  Future<void> _checkStoredAuthentication() async {
+    print('🔍 Checking for stored authentication...');
+
+    try {
+      // Check if there's a stored token directly from AuthTokenManager
+      final token = await AuthTokenManager.instance.getAuthToken();
+
+      if (token == null || token.isEmpty) {
+        print('❌ No stored auth token found');
+        return;
+      }
+
+      print('🔑 Found stored token, attempting to restore session...');
+      _setBusy(true);
+
+      // Import AuthTokenManager to get stored user data
+      final authManager = AuthTokenManager.instance;
+      final userData = await authManager.getUserData();
+
+      if (userData != null && userData['user'] != null) {
+        final userMap = userData['user'] as Map<String, dynamic>;
+
+        // Create User object from stored data
+        _currentUser = User(
+          id: userMap['_id']?.toString() ?? userMap['id']?.toString() ?? '',
+          firstName: userMap['firstName']?.toString() ?? '',
+          lastName: userMap['lastName']?.toString() ?? '',
+          email: userMap['email']?.toString() ?? '',
+          phone: userMap['phone']?.toString(),
+          type: userMap['userType']?.toString() == 'worker'
+              ? UserType.worker
+              : UserType.employer,
+          isPremium: userMap['isPremium'] == true,
+          freeJobsPosted: (userMap['freeJobsPosted'] as num?)?.toInt() ?? 0,
+          freeApplicationsUsed:
+              (userMap['freeApplicationsUsed'] as num?)?.toInt() ?? 0,
+          selectedBusinessId: userMap['selectedBusinessId']?.toString(),
+          roles: [], // Will be loaded by refreshActiveRole
+          ownedBusinesses: [], // Will be loaded by refreshActiveRole
+          teamBusinesses: [], // Will be loaded by refreshActiveRole
+        );
+
+        _activeRole = _currentUser!.type;
+
+        print('✅ Successfully restored session for: ${_currentUser!.email}');
+        print('🎭 Active role: ${_currentUser!.type}');
+
+        // Update service with token
+        _service.updateAuthToken(token);
+
+        // Load role-specific data
+        await refreshActiveRole();
+
+        notifyListeners();
+      } else {
+        print('❌ No valid stored user data found');
+        // Clear invalid token
+        await authManager.clearAll();
+      }
+    } catch (error) {
+      print('❌ Error restoring stored authentication: $error');
+      // Clear invalid token on error
+      try {
+        final authManager = AuthTokenManager.instance;
+        await authManager.clearAll();
+      } catch (logoutError) {
+        print('❌ Error clearing invalid token: $logoutError');
+      }
+    } finally {
+      _setBusy(false);
+    }
+  }
 
   // ================== Worker Preferences Methods ==================
   Future<void> updateWorkerPreferences({
@@ -236,6 +318,7 @@ class AppState extends ChangeNotifier {
   AnalyticsSummary? get analyticsSummary => _analyticsSummary;
   List<AttendanceRecord> get employerAttendance => _employerAttendance;
   List<Application> get employerApplications => _employerApplications;
+  String? get employerApplicationsError => _employerApplicationsError;
   List<Conversation> get conversations => _conversations;
   List<Application> get selectedJobApplications => _selectedJobApplications;
   ServiceLocator get service => _service;
@@ -411,63 +494,26 @@ class AppState extends ChangeNotifier {
       _workerAttendanceSchedules;
 
   // ================== Authentication ==================
-  Future<void> login({
+  Future<String> login({
     required String email,
     required String password,
     UserType? type,
   }) async {
     _setBusy(true);
     try {
-      _currentUser = await _service.auth.login(
+      final (user, message) = await _service.auth.login(
         email: email,
         password: password,
       );
-      _activeRole = _currentUser?.type;
-      _service.updateAuthToken(_service.auth.authToken);
-      _service.updateCurrentUser(_currentUser);
-      print('🔑 Stored Auth Token: ${_service.auth.authToken}');
 
-      // Create temporary profile data to prevent loading screen from getting stuck
-      if (_currentUser != null && _activeRole == UserType.worker) {
-        // Create a basic worker profile with current user data
-        _workerProfile = WorkerProfile(
-          id: _currentUser!.id,
-          firstName: _currentUser!.firstName,
-          lastName: _currentUser!.lastName,
-          email: _currentUser!.email,
-          phone: '',
-          emailNotificationsEnabled: true,
-          skills: const [],
-          experience: '',
-          bio: 'Loading profile data...',
-          rating: 0.0,
-          completedJobs: 0,
-          totalEarnings: 0.0,
-          languages: const [],
-          availability: const [],
-          isVerified: false,
-          weeklyEarnings: 0.0,
-          preferredRadiusMiles: 10.0,
-          notificationsEnabled: true,
-        );
-
-        // Create basic metrics
-        _workerMetrics = const WorkerDashboardMetrics(
-          availableJobs: 0,
-          activeApplications: 0,
-          upcomingShifts: 0,
-          completedHours: 0,
-          earningsThisWeek: 0.0,
-          freeApplicationsRemaining: 3,
-          isPremium: false,
-        );
+      if (user != null) {
+        _currentUser = user;
+        _activeRole = _currentUser?.type;
+        _service.updateAuthToken(_service.auth.authToken);
+        _service.updateCurrentUser(_currentUser);
       }
 
-      // Refresh data immediately after login
-      await refreshActiveRole();
-
-      // Initialize push notifications after successful login
-      await _initializePushNotifications();
+      return message;
     } finally {
       _setBusy(false);
     }
@@ -1528,6 +1574,7 @@ class AppState extends ChangeNotifier {
           description: job.description,
           employerId: job.employerId,
           businessId: job.businessId,
+          businessAddress: job.businessAddress,
           hourlyRate: job.hourlyRate,
           scheduleStart: job.scheduleStart,
           scheduleEnd: job.scheduleEnd,
@@ -2244,9 +2291,30 @@ class AppState extends ChangeNotifier {
       );
 
       _employerApplications = applications;
+      _employerApplicationsError = null;
       notifyListeners();
+    } on ApiWorkConnectException catch (apiError) {
+      debugPrint(
+        '❌ AppState: failed to refresh employer applications (status ${apiError.statusCode}): ${apiError.message}',
+      );
+
+      if (apiError.statusCode == 403) {
+        _employerApplications = const [];
+        _employerApplicationsError =
+            'You need the view applications permission to access candidate data for this business.';
+        notifyListeners();
+        return;
+      }
+
+      _employerApplicationsError =
+          'We could not load applications right now. Please try again shortly.';
+      notifyListeners();
+      rethrow;
     } catch (error) {
       debugPrint('❌ AppState: failed to refresh employer applications: $error');
+      _employerApplicationsError =
+          'We could not load applications right now. Please try again shortly.';
+      notifyListeners();
       rethrow;
     } finally {
       _setBusy(false);
@@ -2656,6 +2724,7 @@ class AppState extends ChangeNotifier {
           description: _workerJobs[jobIndex].description,
           employerId: _workerJobs[jobIndex].employerId,
           businessId: _workerJobs[jobIndex].businessId,
+          businessAddress: _workerJobs[jobIndex].businessAddress,
           hourlyRate: _workerJobs[jobIndex].hourlyRate,
           scheduleStart: _workerJobs[jobIndex].scheduleStart,
           scheduleEnd: _workerJobs[jobIndex].scheduleEnd,
@@ -2711,6 +2780,7 @@ class AppState extends ChangeNotifier {
     bool? locationEnabled,
     bool? shareWorkHistory,
     double? preferredRadiusMiles,
+    String? profilePictureUrl,
   }) async {
     if (_workerProfile == null) return;
 
@@ -2739,6 +2809,7 @@ class AppState extends ChangeNotifier {
         emailNotificationsEnabled: emailNotificationsEnabled,
         minimumPay: minimumPay,
         maxTravelDistance: maxTravelDistance,
+        profilePictureUrl: profilePictureUrl,
         availableForFullTime: availableForFullTime,
         availableForPartTime: availableForPartTime,
         availableForTemporary: availableForTemporary,
@@ -2794,8 +2865,9 @@ class AppState extends ChangeNotifier {
       final trimmedMessage = message?.trim();
       final application = await service.worker.withdrawApplication(
         applicationId: applicationId,
-        message:
-            (trimmedMessage != null && trimmedMessage.isNotEmpty) ? trimmedMessage : null,
+        message: (trimmedMessage != null && trimmedMessage.isNotEmpty)
+            ? trimmedMessage
+            : null,
       );
 
       final index =
@@ -3189,6 +3261,7 @@ class AppState extends ChangeNotifier {
       description: job.description,
       employerId: job.employerId,
       businessId: job.businessId,
+      businessAddress: job.businessAddress,
       hourlyRate: job.hourlyRate,
       scheduleStart: job.scheduleStart,
       scheduleEnd: job.scheduleEnd,

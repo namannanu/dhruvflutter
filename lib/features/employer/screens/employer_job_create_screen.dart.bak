@@ -346,8 +346,7 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
         urgencyValue = 'high';
         break;
       case 'emergency':
-        // Backend only accepts low/medium/high; map emergency to highest level.
-        urgencyValue = 'high';
+        urgencyValue = 'critical';
         break;
       default:
         urgencyValue = 'medium';
@@ -443,11 +442,201 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
     final appState = context.watch<AppState>();
     final businesses = appState.businesses;
     final mediaQuery = MediaQuery.of(context);
-    final double keyboardInset = mediaQuery.viewInsets.bottom;
-    final double safeBottom = mediaQuery.padding.bottom;
-    final double fabBottomPadding =
-        keyboardInset > 0 ? keyboardInset + 16 : safeBottom + 16;
+    final isKeyboardOpen = mediaQuery.viewInsets.bottom > 0;
+    final submitLabel = _buildSubmitLabel(appState);
     _buildFreeJobMessage(appState);
+
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: Colors.white,
+        elevation: 0,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Post a Job',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      body: Stack(
+        children: [
+          SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildBusinessSelector(businesses),
+                    const SizedBox(height: 16),
+                    _buildJobTypeSection(),
+                    const SizedBox(height: 16),
+                    _buildLocationSection(),
+                    const SizedBox(height: 16),
+                    _buildScheduleSection(),
+                    const SizedBox(height: 16),
+                    _buildPaySection(appState),
+                    const SizedBox(height: 16),
+                    _buildUrgencySection(),
+                    const SizedBox(height: 16),
+                    _buildDescriptionSection(),
+                    // Add extra padding for floating button
+                    SizedBox(height: isKeyboardOpen ? mediaQuery.viewInsets.bottom + 80 : 80),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          
+          // Floating publish button
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: isKeyboardOpen ? mediaQuery.viewInsets.bottom + 16 : 16,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: FloatingActionButton.extended(
+                onPressed: _submitting ? null : _submit,
+                backgroundColor: Theme.of(context).primaryColor,
+                icon: _submitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.check_circle_outline),
+                label: Text(
+                  submitLabel,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+                pinned: true,
+                automaticallyImplyLeading: false,
+                backgroundColor: Colors.white,
+                elevation: 0,
+                titleSpacing: 0,
+                title: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Post a Job',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildBusinessSelector(businesses),
+                        const SizedBox(height: 16),
+                        _buildJobTypeSection(),
+                        const SizedBox(height: 16),
+                        _buildLocationSection(),
+                        const SizedBox(height: 16),
+                        _buildScheduleSection(),
+                        const SizedBox(height: 16),
+                        _buildPaySection(null),
+                        const SizedBox(height: 16),
+                        _buildUrgencySection(),
+                        const SizedBox(height: 16),
+                        _buildDescriptionSection(),
+                        // Add extra space for the floating button
+                        SizedBox(height: isKeyboardVisible ? mediaQuery.viewInsets.bottom : 0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          
+          // Floating publish button
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: isKeyboardVisible ? mediaQuery.viewInsets.bottom + 16 : 16,
+            child: FloatingActionButton.extended(
+              onPressed: _submitting ? null : _submit,
+              backgroundColor: Theme.of(context).primaryColor,
+              icon: _submitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.check),
+              label: Text(
+                submitLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
 
     if (businesses.isEmpty) {
       _selectedBusiness = null;
@@ -461,9 +650,104 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
       }
     }
 
+    final mediaQuery = MediaQuery.of(context);
+    final isKeyboardOpen = mediaQuery.viewInsets.bottom > 0;
+    final submitLabel = _buildSubmitLabel(appState);
+    _buildFreeJobMessage(appState);
+
     return Scaffold(
-      body: SafeArea(
-        child: GestureDetector(
+      resizeToAvoidBottomInset: false,
+      body: Stack(
+        children: [
+          SafeArea(
+            child: GestureDetector(
+              onTap: () => FocusScope.of(context).unfocus(), // Dismiss keyboard on tap
+              child: Form(
+                key: _formKey,
+                child: CustomScrollView(
+                  slivers: [
+                    SliverAppBar(
+                      pinned: true,
+                      automaticallyImplyLeading: false,
+                      backgroundColor: Colors.white,
+                      elevation: 0,
+                      titleSpacing: 0,
+                      title: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.arrow_back),
+                              onPressed: () => Navigator.of(context).pop(),
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Post a Job',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildBusinessSelector(businesses),
+                            const SizedBox(height: 16),
+                            _buildJobTypeSection(),
+                            const SizedBox(height: 16),
+                            _buildLocationSection(),
+                            const SizedBox(height: 16),
+                            _buildScheduleSection(),
+                            const SizedBox(height: 16),
+                            _buildPaySection(null),
+                            const SizedBox(height: 16),
+                            _buildUrgencySection(),
+                            const SizedBox(height: 16),
+                            _buildDescriptionSection(),
+                            // Add extra padding at bottom to ensure content is visible above FAB
+                            SizedBox(height: 80 + (isKeyboardOpen ? mediaQuery.viewInsets.bottom : 0)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: isKeyboardOpen ? mediaQuery.viewInsets.bottom + 16 : 16,
+            child: FloatingActionButton.extended(
+              onPressed: _submitting ? null : _submit,
+              icon: _submitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.check),
+              label: Text(submitLabel),
+            ),
+          ),
+        ],
+      ),
           onTap: () {
             // Dismiss keyboard when tapping outside text fields
             FocusScope.of(context).unfocus();
@@ -528,27 +812,65 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
           ),
         ),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: AnimatedPadding(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          bottom: fabBottomPadding,
-        ),
-        child: FloatingActionButton.extended(
-          onPressed: _submitting ? null : _submit,
-          icon: _submitting
-              ? const SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.check_circle_outline),
-          label: Text(_buildSubmitLabel(appState)),
-        ),
+      body: Stack(
+        children: [
+          SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildBusinessSelector(businesses),
+                    const SizedBox(height: 16),
+                    _buildJobTypeSection(),
+                    const SizedBox(height: 16),
+                    _buildLocationSection(),
+                    const SizedBox(height: 16),
+                    _buildScheduleSection(),
+                    const SizedBox(height: 16),
+                    _buildPaySection(),
+                    const SizedBox(height: 16),
+                    _buildUrgencySection(),
+                    const SizedBox(height: 16),
+                    _buildDescriptionSection(),
+                    // Add extra padding at bottom for floating button
+                    SizedBox(height: 80),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          
+          // Floating publish button that stays above keyboard
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: mediaQuery.viewInsets.bottom + 16,
+            child: FloatingActionButton.extended(
+              onPressed: _submitting ? null : _submit,
+              backgroundColor: Theme.of(context).primaryColor,
+              icon: _submitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.check_circle_outline),
+              label: Text(
+                submitLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
