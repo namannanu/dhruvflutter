@@ -53,22 +53,25 @@ class _EmployerShellState extends State<EmployerShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Employer workspace'),
+        title: const Text(
+          'Employer workspace',
+          style: TextStyle(fontSize: 16),
+        ),
         actions: [
           IconButton(
             tooltip: 'Messages',
-            icon: const Icon(Icons.message),
+            icon: const Icon(Icons.message, size: 20),
             onPressed: _openMessaging,
           ),
           IconButton(
             tooltip: 'Notifications',
-            icon: const Icon(Icons.notifications),
+            icon: const Icon(Icons.notifications, size: 20),
             onPressed: _openNotifications,
           ),
 
           IconButton(
             tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, size: 20),
             onPressed: () => context.read<AppState>().refreshActiveRole(),
           ),
           PopupMenuButton<String>(

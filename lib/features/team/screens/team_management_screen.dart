@@ -144,7 +144,7 @@ class _TeamManagementScreenState extends State<TeamManagementScreen>
                 print('Current User ID: $currentUserId');
                 print(
                     'Selected Business ID: ${appState.currentUser?.selectedBusinessId}');
-                print('User Permissions: ${appState.currentUserPermissions}');
+                // User permissions removed per user request
 
                 showDialog(
                   context: context,

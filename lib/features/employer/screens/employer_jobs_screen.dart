@@ -5,14 +5,11 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
-import 'package:talent/features/employer/screens/employee_hire_application_screen.dart';
 import 'package:talent/features/employer/screens/employer_job_create_screen.dart';
 import 'package:talent/features/employer/screens/job_payment_screen.dart';
 import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/shared/mixins/auto_refresh_mixin.dart';
-import 'package:talent/core/services/permission_service.dart';
-import 'package:talent/core/widgets/permission_widgets.dart';
 import 'package:talent/core/widgets/access_tag.dart';
 
 class EmployerJobsScreen extends StatefulWidget {
@@ -24,7 +21,9 @@ class EmployerJobsScreen extends StatefulWidget {
 
 class _EmployerJobsScreenState extends State<EmployerJobsScreen>
     with AutoRefreshMixin<EmployerJobsScreen> {
-  JobStatus? _jobStatusFilter; // null = all, active, closed, filled
+  JobStatus? _jobStatusFilter;
+  
+  Null get trailing => null; // null = all, active, closed, filled
 
   @override
   Future<void> refreshData() async {
@@ -123,27 +122,8 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen>
     final allJobs = appState.employerJobs;
     final filteredJobs = _getFilteredJobs(allJobs);
     final applications = appState.selectedJobApplications;
-    final permissionService = PermissionService(context: context);
 
-    if (!permissionService.hasPermission('view_jobs')) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.lock_outline, size: 48),
-              SizedBox(height: 12),
-              Text(
-                'You do not have permission to view job postings.',
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    // Permission checks removed per user request
 
     return RefreshIndicator(
       onRefresh: () async => context.read<AppState>().refreshActiveRole(),
@@ -152,6 +132,7 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen>
         children: [
           const SectionHeader(
             title: 'Job management',
+            style: TextStyle(fontSize: 16),
             subtitle: 'Post openings, track applicants, and manage quotas',
           ),
           const SizedBox(height: 16),
@@ -178,37 +159,18 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen>
             spacing: 12,
             runSpacing: 12,
             children: [
-              PermissionGuard(
-                permission: 'create_jobs',
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    final created = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute(
-                          builder: (_) => const EmployerJobCreateScreen()),
-                    );
-                    if (created == true) {
-                      // job list updates inside AppState.createEmployerJob
-                    }
-                  },
-                  icon: const Icon(Icons.add_circle_outline),
-                  label: const Text('Create new job'),
-                ),
-              ),
-              PermissionGuard(
-                permission: 'view_applications',
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const EmployeeHireApplicationScreen(),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.people_alt_outlined),
-                  label: Text(
-                    'Review applications (${appState.employerApplications.length})',
-                  ),
-                ),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  final created = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(
+                        builder: (_) => const EmployerJobCreateScreen()),
+                  );
+                  if (created == true) {
+                    // job list updates inside AppState.createEmployerJob
+                  }
+                },
+                icon: const Icon(Icons.add_circle_outline),
+                label: const Text('Create new job'),
               ),
             ],
           ),
@@ -216,18 +178,20 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen>
           if (filteredJobs.isEmpty)
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    const Icon(Icons.work_outline, size: 48),
-                    const SizedBox(height: 12),
-                    Text(
-                      _jobStatusFilter == null
-                          ? 'No job postings yet. Tap "Create new job" to get started.'
-                          : 'No ${_getStatusLabel(_jobStatusFilter!).toLowerCase()} jobs found.',
-                    ),
-                  ],
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                const Icon(Icons.work_outline, size: 48),
+                const SizedBox(height: 10),
+                Text(
+                  _jobStatusFilter == null
+                    ? 'No job postings yet. Tap "Create new job" to get started.'
+                    : 'No ${_getStatusLabel(_jobStatusFilter!).toLowerCase()} jobs found.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 10),
                 ),
+                ],
+              ),
               ),
             )
           else
@@ -236,16 +200,16 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen>
                   onCloseJob: _closeJobPost,
                 )),
           const SizedBox(height: 24),
-          if (permissionService.hasPermission('view_applications') &&
-              applications.isNotEmpty)
+          if (applications.isNotEmpty)
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SectionHeader(
+                const SectionHeader(
                   title: 'Applicants',
                   subtitle: 'Review candidates and take hiring actions',
-                  trailing: Text('${applications.length} total'),
+                  style: TextStyle(fontSize: 10),
                 ),
+                Text('${applications.length} total'),
                 const SizedBox(height: 12),
                 ...applications.map(
                   (application) => _ApplicantCard(application: application),

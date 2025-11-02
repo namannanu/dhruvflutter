@@ -115,7 +115,6 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       body['profilePictureUrl'] = profilePictureUrl;
     }
 
-
     final response = await client.patch(
       resolveWithQuery('/workers/me'),
       headers: headers(authToken: _authToken),
@@ -156,9 +155,6 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         )
         .toList();
   }
-
-
-
 
   Map<String, dynamic> _extractProfilePayload(Map<String, dynamic> json) {
     Map<String, dynamic>? asMap(dynamic value) {
@@ -780,7 +776,7 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       upcomingShifts: upcomingShifts,
       completedHours: completedHours,
       earningsThisWeek: earningsThisWeek,
-      freeApplicationsRemaining: 3,
+      freeApplicationsRemaining: 2,
       isPremium: false,
     );
   }
@@ -948,7 +944,8 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     } else {
       print('✅ DEBUG: Successful API response [$debugLabel]');
       print(
-          '🔍 DEBUG: Response body preview [$debugLabel]: ${response.body.length > 200 ? '${response.body.substring(0, 200)}...' : response.body}',);
+        '🔍 DEBUG: Response body preview [$debugLabel]: ${response.body.length > 200 ? '${response.body.substring(0, 200)}...' : response.body}',
+      );
     }
 
     final decoded = decodeJson(response);
@@ -1036,6 +1033,73 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     final json = _mapOrNull(value) ?? const <String, dynamic>{};
     final id = _string(json['id']) ?? _string(json['_id']) ?? '';
 
+    String? deriveLocationAddress(dynamic rawLocation) {
+      if (rawLocation is Map) {
+        final map = <String, dynamic>{};
+        rawLocation.forEach((key, val) {
+          map[key.toString()] = val;
+        });
+        final formatted = _string(map['formattedAddress']);
+        if (formatted != null && formatted.trim().isNotEmpty) {
+          return formatted.trim();
+        }
+        final label = _string(map['label']) ?? _string(map['name']);
+        if (label != null && label.trim().isNotEmpty) {
+          return label.trim();
+        }
+
+        final addressObj = map['address'] is Map ? Map<String, dynamic>.from(map['address'] as Map) : null;
+        final addressLine1 =
+            _string(addressObj?['line1']) ?? _string(addressObj?['street']) ?? _string(addressObj?['address1']);
+        final addressLine2 =
+            _string(addressObj?['line2']) ?? _string(addressObj?['street2']) ?? _string(addressObj?['address2']);
+
+        final parts = <String>[];
+        final line1 =
+            _string(map['line1']) ?? _string(map['street']) ?? _string(map['address']) ?? addressLine1;
+        final line2 = _string(map['line2']);
+        final city = _string(map['city']) ?? _string(addressObj?['city']);
+        final state = _string(map['state']) ?? _string(addressObj?['state']);
+        final postalCode =
+            _string(map['postalCode']) ?? _string(map['zip']) ?? _string(addressObj?['postalCode']) ?? _string(addressObj?['zip']);
+
+        if (line1 != null && line1.trim().isNotEmpty) {
+          parts.add(line1.trim());
+        }
+        if (line2 != null && line2.trim().isNotEmpty) {
+          parts.add(line2.trim());
+        }
+        if (addressLine2 != null && addressLine2.trim().isNotEmpty) {
+          parts.add(addressLine2.trim());
+        }
+
+        final cityState = <String>[
+          if (city != null && city.trim().isNotEmpty) city.trim(),
+          if (state != null && state.trim().isNotEmpty) state.trim(),
+        ].join(
+          (city != null && city.trim().isNotEmpty) &&
+                  (state != null && state.trim().isNotEmpty)
+              ? ', '
+              : '',
+        );
+        if (cityState.isNotEmpty) {
+          parts.add(
+            postalCode != null && postalCode.trim().isNotEmpty
+                ? '$cityState ${postalCode.trim()}'
+                : cityState,
+          );
+        } else if (postalCode != null && postalCode.trim().isNotEmpty) {
+          parts.add(postalCode.trim());
+        }
+
+        final joined = parts.where((segment) => segment.trim().isNotEmpty).join(', ');
+        if (joined.trim().isNotEmpty) {
+          return joined.trim();
+        }
+      }
+      return null;
+    }
+
     try {
       // Debug logging to see raw job data
       print('DEBUG: Parsing job with ID: $id');
@@ -1113,6 +1177,13 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       final businessName = _string(json['businessName']) ??
           _string(json['businessDetails']?['name']) ??
           '';
+      final businessAddress =
+          _string(json['businessAddress']) ??
+              deriveLocationAddress(json['location']) ??
+              deriveLocationAddress(json['businessDetails']?['location']) ??
+              _string(json['businessDetails']?['address']) ??
+              '';
+
       final businessLogoUrl = _string(json['businessLogoUrl']) ??
           _string(json['businessDetails']?['logoUrl']);
       final businessLogoOriginalUrl =
@@ -1155,7 +1226,7 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         businessLogoSquareUrl: businessLogoSquareUrl,
         isPublished: isPublished,
         publishStatus: publishStatus,
-        businessAddress: '',
+        businessAddress: businessAddress,
       );
     } catch (e, stackTrace) {
       print('ERROR: Failed to parse job posting: $e');
@@ -1812,7 +1883,7 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         asInt(metrics['freeApplicationsRemaining']) ??
             asInt(freeTier?['remainingApplications']) ??
             derivedRemaining ??
-            3;
+            2;
     final isPremium =
         asBool(metrics['isPremium']) ?? asBool(premium?['isActive']) ?? false;
 

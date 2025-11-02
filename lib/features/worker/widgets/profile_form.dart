@@ -3,7 +3,9 @@
 import 'dart:convert';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:talent/core/services/image_optimization_service.dart';
 import 'package:talent/features/shared/widgets/profile_picture_avatar.dart';
 import 'package:talent/features/worker/models/availability.dart';
 
@@ -258,8 +260,17 @@ class EditableProfileForm extends StatelessWidget {
 
       final mime = file.mimeType ?? _lookupMimeType(file.name);
       final dataUrl = 'data:$mime;base64,${base64Encode(bytes)}';
+      final optimized =
+          ImageOptimizationService.optimizeDataUrl(dataUrl) ?? dataUrl;
+
+      if (kDebugMode) {
+        debugPrint(
+          '📉 Optimized profile photo data URL to '
+          '${optimized.length} chars (was ${dataUrl.length})',
+        );
+      }
       
-      profilePictureUrlController.text = dataUrl;
+      profilePictureUrlController.text = optimized;
     } catch (error) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

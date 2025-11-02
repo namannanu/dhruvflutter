@@ -33,7 +33,7 @@ class _WorkerCommunicationsScreenState
           const SectionHeader(
             title: 'Notifications',
             subtitle:
-                'System alerts, application updates, and schedule changes',
+                'System alerts, application updates, and schedule changes', style: TextStyle(fontSize: 10),
           ),
           const SizedBox(height: 16),
           if (notifications.isEmpty)
@@ -45,7 +45,7 @@ class _WorkerCommunicationsScreenState
           const SizedBox(height: 24),
           const SectionHeader(
             title: 'Inbox',
-            subtitle: 'Keep conversations going with employers',
+            subtitle: 'Keep conversations going with employers', style: TextStyle(fontSize: 10),
           ),
           const SizedBox(height: 16),
           if (conversations.isEmpty)

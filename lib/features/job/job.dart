@@ -1,5 +1,6 @@
 // ignore_for_file: require_trailing_commas, avoid_print
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../core/utils/safe_num.dart';
 
@@ -100,37 +101,8 @@ class JobPosting {
 
   /// ✅ Safe JSON parsing
   factory JobPosting.fromJson(Map<String, dynamic> json) {
-    // Debug logging for logo type error
-    print('🔍 JobPosting.fromJson - Debugging logo field parsing');
-    print('   Raw JSON keys: ${json.keys.toList()}');
-
-    // Check for any logo-related fields
-    final logoFields =
-        json.keys.where((key) => key.toLowerCase().contains('logo')).toList();
-    if (logoFields.isNotEmpty) {
-      print('   Logo-related fields found: $logoFields');
-      for (final field in logoFields) {
-        print('   $field = ${json[field]} (type: ${json[field].runtimeType})');
-      }
-    }
-
-    // Check applicantsCount field specifically
-    if (json.containsKey('applicantsCount')) {
-      print(
-          '   applicantsCount = ${json['applicantsCount']} (type: ${json['applicantsCount'].runtimeType})');
-    }
-
-    // Check if there's any field with value 'logo' that might be confused
-    final fieldsWithLogoValue = <String>[];
-    json.forEach((key, value) {
-      if (value.toString().toLowerCase() == 'logo') {
-        fieldsWithLogoValue.add(key);
-      }
-    });
-    if (fieldsWithLogoValue.isNotEmpty) {
-      print('   Fields with "logo" as value: $fieldsWithLogoValue');
-    }
-
+    // Optimized parsing without verbose debug logging for better performance
+    
     Map<String, dynamic>? asMap(dynamic value) {
       if (value is Map<String, dynamic>) {
         return value;
@@ -140,6 +112,76 @@ class JobPosting {
             value.map((key, val) => MapEntry(key.toString(), val)));
       }
       return null;
+    }
+
+    String? parseLocationAddress(Map<String, dynamic>? location) {
+      if (location == null) return null;
+
+      String? clean(dynamic value) {
+        if (value == null) return null;
+        final str = value.toString().trim();
+        return str.isEmpty ? null : str;
+      }
+
+      final formatted = clean(location['formattedAddress']);
+      if (formatted != null) {
+        return formatted;
+      }
+
+      final label = clean(location['label']) ?? clean(location['name']);
+      if (label != null) {
+        return label;
+      }
+
+      final addressObj = location['address'] is Map
+          ? Map<String, dynamic>.from(location['address'] as Map)
+          : null;
+
+      final line1 = clean(location['line1']) ??
+          clean(location['street']) ??
+          clean(location['address']) ??
+          clean(addressObj?['line1']) ??
+          clean(addressObj?['street']) ??
+          clean(addressObj?['address1']);
+      final line2 = clean(location['line2']) ??
+          clean(location['street2']) ??
+          clean(addressObj?['line2']) ??
+          clean(addressObj?['street2']) ??
+          clean(addressObj?['address2']);
+
+      final parts = <String>[];
+      if (line1 != null) {
+        parts.add(line1);
+      }
+      if (line2 != null) {
+        parts.add(line2);
+      }
+
+      final city = clean(location['city']) ?? clean(addressObj?['city']);
+      final state = clean(location['state']) ?? clean(addressObj?['state']);
+      final postal = clean(location['postalCode']) ??
+          clean(location['zip']) ??
+          clean(addressObj?['postalCode']) ??
+          clean(addressObj?['zip']);
+      final cityStateParts = <String>[];
+      if (city != null) {
+        cityStateParts.add(city);
+      }
+      if (state != null) {
+        cityStateParts.add(state);
+      }
+      if (cityStateParts.isNotEmpty) {
+        final cityState = cityStateParts.join(', ');
+        parts.add(postal != null ? '$cityState $postal' : cityState);
+      } else if (postal != null) {
+        parts.add(postal);
+      }
+
+      final joined = parts
+          .map((segment) => segment.trim())
+          .where((segment) => segment.isNotEmpty)
+          .join(', ');
+      return joined.isNotEmpty ? joined : null;
     }
 
     String? combineName(Map<String, dynamic>? data) {
@@ -219,6 +261,8 @@ class JobPosting {
         businessDetails?['name']?.toString() ??
         '';
     final businessAddress = json['businessAddress']?.toString() ??
+        parseLocationAddress(asMap(json['location'])) ??
+        parseLocationAddress(asMap(businessDetails?['location'])) ??
         businessDetails?['address']?.toString() ??
         '';
     String? businessLogoUrl = json['businessLogoUrl']?.toString();
@@ -226,17 +270,10 @@ class JobPosting {
     String? businessLogoSquareUrl;
     final businessLogoDetails =
         asMap(json['businessLogo']) ?? asMap(businessDetails?['logo']);
-    print('🔍 DEBUG: Business logo parsing');
-    print('   businessDetails: $businessDetails');
-    print(
-        '   businessDetails["logo"]: ${businessDetails?['logo']} (type: ${businessDetails?['logo'].runtimeType})');
-    print('   businessLogoDetails after asMap: $businessLogoDetails');
 
     if (businessLogoDetails != null) {
       final square = businessLogoDetails['square'];
       final original = businessLogoDetails['original'];
-      print('   square: $square (type: ${square.runtimeType})');
-      print('   original: $original (type: ${original.runtimeType})');
 
       if (square is Map && square['url'] is String) {
         businessLogoSquareUrl = square['url'].toString().trim();
@@ -323,17 +360,10 @@ class JobPosting {
       locationSummary: json['locationSummary']?.toString(),
       applicantsCount: (() {
         try {
-          final value = json['applicantsCount'];
-          print(
-              '🔍 DEBUG: Parsing applicantsCount = $value (type: ${value.runtimeType})');
-          final result = SafeNum.toSafeInt(value);
-          print('   Successfully parsed as: $result');
-          return result;
+          return SafeNum.toSafeInt(json['applicantsCount']);
         } catch (e) {
-          print('❌ ERROR: Failed to parse applicantsCount - $e');
-          print('   Raw value: ${json['applicantsCount']}');
-          print('   Raw type: ${json['applicantsCount'].runtimeType}');
-          rethrow;
+          // Simplified error handling for better performance
+          return 0;
         }
       })(),
       businessName: businessName,

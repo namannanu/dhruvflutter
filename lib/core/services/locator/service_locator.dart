@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:talent/core/models/jwt_payload.dart';
 import 'package:talent/core/models/user.dart';
+import 'package:talent/core/utils/performance_monitor.dart';
 import 'package:talent/features/auth/services/api_auth_service.dart';
 import 'package:talent/features/business/services/api_business_service.dart';
 import 'package:talent/features/employer/services/api_employer_service.dart';
@@ -35,13 +36,18 @@ class ServiceLocator {
     String? authToken,
     bool enableLogging = false,
   }) async {
+    PerformanceMonitor.startTiming('ServiceLocator Create');
+    PerformanceMonitor.startTiming('WorkerCache Create');
     final workerCache = await WorkerCacheRepository.create();
+    PerformanceMonitor.endTiming('WorkerCache Create');
+    
     _instance = ServiceLocator(
       baseUrl: baseUrl,
       authToken: authToken,
       enableLogging: enableLogging,
       workerCache: workerCache,
     );
+    PerformanceMonitor.endTiming('ServiceLocator Create');
     return _instance!;
   }
 

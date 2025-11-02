@@ -7,7 +7,8 @@ import 'package:http/http.dart' as http;
 import 'package:talent/core/services/base/base_api_service.dart';
 
 class EnhancedApiService extends BaseApiService {
-  static const Duration _requestTimeout = Duration(seconds: 30);
+  static const Duration _requestTimeout =
+      Duration(seconds: 60); // Increased for slow networks
   final Map<String, _CacheEntry> _cache = {};
   Timer? _cacheCleanupTimer;
 

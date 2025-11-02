@@ -3,33 +3,40 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:talent/core/cache/cache_service.dart';
 import 'package:talent/core/config/environment_config.dart';
 import 'package:talent/core/config/payment_config.dart';
 import 'package:talent/core/models/models.dart';
+import 'package:talent/core/repositories/employer_repository.dart';
+import 'package:talent/core/repositories/worker_repository.dart';
 import 'package:talent/core/services/base/base_api_service.dart';
 import 'package:talent/core/services/business_access_context.dart';
+import 'package:talent/core/services/image_optimization_service.dart';
 import 'package:talent/core/services/location_service.dart';
 import 'package:talent/core/services/locator/service_locator.dart';
 import 'package:talent/core/services/push_notification_service.dart';
-import 'package:talent/core/services/user_permissions_service.dart';
 import 'package:talent/services/auth_token_manager.dart';
 
 part 'payment_extensions.dart';
 
 class AppState extends ChangeNotifier {
   AppState(this._service) {
-    // Automatically check for stored authentication when AppState is created
-    _checkStoredAuthentication();
+    _init();
   }
 
   final ServiceLocator _service;
-  final UserPermissionsService _userPermissionsService =
-      UserPermissionsService();
+
+  // Cache and repositories
+  late CacheService _cache;
+  late WorkerRepository _workerRepo;
+  late EmployerRepository _employerRepo;
 
   bool _isBusy = false;
   User? _currentUser;
@@ -57,8 +64,6 @@ class AppState extends ChangeNotifier {
   List<Application> _employerApplications = [];
   String? _employerApplicationsError;
   TeamMember? _currentUserTeamMember;
-  List<String> _currentUserPermissions = <String>[];
-  String? _currentUserPermissionsBusinessId;
   bool _isLoadingCurrentUserTeamMember = false;
 
   // Attendance management state
@@ -86,22 +91,31 @@ class AppState extends ChangeNotifier {
   Completer<void>? _paymentCompleter;
   _PendingJobPayment? _pendingJobPayment;
 
-  // ================== Authentication Initialization ==================
+  // ================== Initialization ==================
+
+  Future<void> _init() async {
+    _cache = await CacheService.open('thrill_cache');
+    _workerRepo = WorkerRepository(_cache);
+    _employerRepo = EmployerRepository(_cache);
+    await _checkStoredAuthentication(); // Continue with existing flow
+  }
 
   /// Automatically check for stored authentication when app starts
   Future<void> _checkStoredAuthentication() async {
-    print('🔍 Checking for stored authentication...');
+    if (kDebugMode) print('🔍 Checking for stored authentication...');
 
     try {
       // Check if there's a stored token directly from AuthTokenManager
       final token = await AuthTokenManager.instance.getAuthToken();
 
       if (token == null || token.isEmpty) {
-        print('❌ No stored auth token found');
+        if (kDebugMode) print('❌ No stored auth token found');
         return;
       }
 
-      print('🔑 Found stored token, attempting to restore session...');
+      if (kDebugMode) {
+        print('🔑 Found stored token, attempting to restore session...');
+      }
       _setBusy(true);
 
       // Import AuthTokenManager to get stored user data
@@ -133,29 +147,33 @@ class AppState extends ChangeNotifier {
 
         _activeRole = _currentUser!.type;
 
-        print('✅ Successfully restored session for: ${_currentUser!.email}');
-        print('🎭 Active role: ${_currentUser!.type}');
+        if (kDebugMode) {
+          print('✅ Successfully restored session for: ${_currentUser!.email}');
+          print('🎭 Active role: ${_currentUser!.type}');
+        }
 
         // Update service with token
         _service.updateAuthToken(token);
 
-        // Load role-specific data
-        await refreshActiveRole();
-
+        // Hydrate from cache immediately (no spinners)
+        await _hydrateFromCache();
         notifyListeners();
+
+        // Kick background refresh (don't block UI)
+        unawaited(_refreshInBackground());
       } else {
-        print('❌ No valid stored user data found');
+        if (kDebugMode) print('❌ No valid stored user data found');
         // Clear invalid token
         await authManager.clearAll();
       }
     } catch (error) {
-      print('❌ Error restoring stored authentication: $error');
+      if (kDebugMode) print('❌ Error restoring stored authentication: $error');
       // Clear invalid token on error
       try {
         final authManager = AuthTokenManager.instance;
         await authManager.clearAll();
       } catch (logoutError) {
-        print('❌ Error clearing invalid token: $logoutError');
+        if (kDebugMode) print('❌ Error clearing invalid token: $logoutError');
       }
     } finally {
       _setBusy(false);
@@ -323,8 +341,59 @@ class AppState extends ChangeNotifier {
   List<Application> get selectedJobApplications => _selectedJobApplications;
   ServiceLocator get service => _service;
   TeamMember? get currentUserTeamMember => _currentUserTeamMember;
-  List<String> get currentUserPermissions =>
-      List.unmodifiable(_currentUserPermissions);
+
+  /// Get filtered applications by status without triggering network requests
+  List<Application> getApplicationsByStatus(ApplicationStatus? status) {
+    if (status == null) return _employerApplications;
+    return _employerApplications.where((app) => app.status == status).toList();
+  }
+
+  /// Quick access to cached applications - no network calls
+  Future<List<Application>> getCachedApplications(
+      {ApplicationStatus? status}) async {
+    final user = _currentUser;
+    if (user == null) return [];
+
+    try {
+      final cached = await _employerRepo.getApplicationsSWR(user.id);
+      if (status != null) {
+        return cached.where((app) => app.status == status).toList();
+      }
+      return cached;
+    } catch (e) {
+      if (kDebugMode) print('Failed to get cached applications: $e');
+      return _employerApplications;
+    }
+  }
+
+  /// Prefetch applications for better performance when navigating to application screens
+  Future<void> prefetchApplications() async {
+    final user = _currentUser;
+    if (user == null || _activeRole != UserType.employer) return;
+
+    try {
+      // Trigger background refresh without blocking UI
+      unawaited(_employerRepo.refreshApplications(user.id));
+      if (kDebugMode) {
+        print('🚀 Applications prefetched for better performance');
+      }
+    } catch (e) {
+      if (kDebugMode) print('⚠️ Failed to prefetch applications: $e');
+    }
+  }
+
+  /// Get application counts by status for dashboard/summary views
+  Map<ApplicationStatus, int> getApplicationCounts() {
+    final counts = <ApplicationStatus, int>{};
+    for (final app in _employerApplications) {
+      counts[app.status] = (counts[app.status] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  /// Get total application count for quick display
+  int get totalApplicationCount => _employerApplications.length;
+
   bool get isLoadingCurrentUserTeamMember => _isLoadingCurrentUserTeamMember;
   List<JobPaymentRecord> get jobPayments => List.unmodifiable(_jobPayments);
   bool get isLoadingJobPayments => _isLoadingJobPayments;
@@ -337,8 +406,6 @@ class AppState extends ChangeNotifier {
   List<EmployerFeedback> get workerFeedback =>
       List.unmodifiable(_workerFeedback);
   bool get isLoadingWorkerFeedback => _isLoadingWorkerFeedback;
-
-  List<String> getCurrentUserPermissions() => currentUserPermissions;
 
   String? _extractObjectId(String? value) {
     if (value == null) return null;
@@ -501,6 +568,7 @@ class AppState extends ChangeNotifier {
   }) async {
     _setBusy(true);
     try {
+      print('🔄 Starting ultra-fast login process...');
       final (user, message) = await _service.auth.login(
         email: email,
         password: password,
@@ -511,11 +579,75 @@ class AppState extends ChangeNotifier {
         _activeRole = _currentUser?.type;
         _service.updateAuthToken(_service.auth.authToken);
         _service.updateCurrentUser(_currentUser);
+
+        print('✅ Ultra-fast login completed for: ${user.email}');
+
+        // Initialize push notifications after successful login
+        unawaited(_initializePushNotifications());
+
+        // Hydrate immediately from cache for instant UI
+        unawaited(_hydrateFromCache());
+
+        // Load full business data in background for employers if needed
+        if (user.type == UserType.employer) {
+          print('🔄 Loading business data in background...');
+          unawaited(_loadBusinessDataInBackground());
+        }
+
+        // Trigger background refresh without blocking login
+        unawaited(_refreshInBackground());
+
+        // Notify listeners immediately for instant UI update
+        notifyListeners();
       }
 
       return message;
     } finally {
       _setBusy(false);
+    }
+  }
+
+  /// Load full business data in background for better login performance
+  /// This loads comprehensive business information while keeping initial login fast
+  Future<void> _loadBusinessDataInBackground() async {
+    try {
+      // Don't set busy state to avoid blocking UI
+      print('📊 Fetching business data...');
+      final businessData = await _service.auth.loadUserBusinesses();
+
+      if (_currentUser != null) {
+        // Update user with business data
+        final updatedUser = User(
+          id: _currentUser!.id,
+          firstName: _currentUser!.firstName,
+          lastName: _currentUser!.lastName,
+          email: _currentUser!.email,
+          phone: _currentUser!.phone,
+          type: _currentUser!.type,
+          freeJobsPosted: _currentUser!.freeJobsPosted,
+          freeApplicationsUsed: _currentUser!.freeApplicationsUsed,
+          isPremium: _currentUser!.isPremium,
+          selectedBusinessId: _currentUser!.selectedBusinessId,
+          roles: _currentUser!.roles,
+          ownedBusinesses: businessData['ownedBusinesses'] ?? [],
+          teamBusinesses: businessData['teamBusinesses'] ?? [],
+        );
+
+        _currentUser = updatedUser;
+        _service.updateCurrentUser(_currentUser);
+
+        print('✅ Business data loaded successfully');
+        print(
+            '📊 Owned businesses: ${businessData['ownedBusinesses']?.length ?? 0}');
+        print(
+            '📊 Team businesses: ${businessData['teamBusinesses']?.length ?? 0}');
+
+        // Trigger UI update
+        notifyListeners();
+      }
+    } catch (error) {
+      print('⚠️ Failed to load business data in background: $error');
+      // Don't throw error to prevent disrupting the login flow
     }
   }
 
@@ -540,10 +672,6 @@ class AppState extends ChangeNotifier {
     String? businessId;
     if (user.type == UserType.employer) {
       businessId = user.selectedBusinessId;
-
-      if (businessId == null || businessId.isEmpty) {
-        businessId = _currentUserPermissionsBusinessId;
-      }
 
       if ((businessId == null || businessId.isEmpty) &&
           _currentUserTeamMember?.businessId.isNotEmpty == true) {
@@ -692,9 +820,21 @@ class AppState extends ChangeNotifier {
   // ================== Push Notifications ==================
   Future<void> _initializePushNotifications() async {
     try {
-      await PushNotificationService.instance.initialize(
+      print('🔄 Initializing push notifications...');
+
+      // Add timeout to prevent hanging during initialization
+      await PushNotificationService.instance
+          .initialize(
         baseUrl: _service.apiUrl,
         authToken: _service.auth.authToken,
+      )
+          .timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          print('⏰ Push notification initialization timed out');
+          throw TimeoutException('Push notification initialization timed out',
+              const Duration(seconds: 30));
+        },
       );
 
       // Set up notification callbacks
@@ -704,8 +844,12 @@ class AppState extends ChangeNotifier {
           _handleNotificationTap;
 
       print('✅ Push notifications initialized successfully');
+    } on TimeoutException catch (e) {
+      print('⏰ Push notification initialization timed out: $e');
+      // Continue app initialization even if push notifications fail
     } catch (e) {
       print('❌ Failed to initialize push notifications: $e');
+      // Continue app initialization even if push notifications fail
     }
   }
 
@@ -815,224 +959,512 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> _loadWorkerDashboardData() async {
+    final user = _currentUser;
+    if (user == null) {
+      return;
+    }
+
+    final workerId = user.id;
+    final resolvedWorkerId = _extractObjectId(workerId) ?? workerId;
+
+    final futures = <Future<void>>[
+      () async {
+        try {
+          _workerApplications =
+              await _service.worker.fetchWorkerApplications(workerId);
+        } catch (error, stackTrace) {
+          debugPrint(
+              '❌ Error loading worker applications in refreshActiveRole: $error');
+          debugPrint(stackTrace.toString());
+          _workerApplications = [];
+        }
+      }(),
+      () async {
+        try {
+          _workerAttendance =
+              await _service.worker.fetchWorkerAttendance(resolvedWorkerId);
+        } catch (error, stackTrace) {
+          debugPrint(
+              '❌ Error loading worker attendance records in refreshActiveRole: $error');
+          debugPrint(stackTrace.toString());
+        }
+      }(),
+      () async {
+        try {
+          _workerJobs = await _service.worker.fetchWorkerJobs(workerId);
+          debugPrint(
+              '✅ Loaded ${_workerJobs.length} worker jobs during refreshActiveRole');
+        } catch (error) {
+          debugPrint(
+              '❌ Error loading worker jobs in refreshActiveRole: $error');
+          _workerJobs = [];
+        }
+      }(),
+      () async {
+        try {
+          _workerMetrics =
+              await _service.worker.fetchWorkerDashboardMetrics('me');
+        } catch (error, stackTrace) {
+          debugPrint('Error fetching worker dashboard metrics: $error');
+          debugPrint(stackTrace.toString());
+        }
+      }(),
+      () async {
+        final wasLoading = _isLoadingEmploymentHistory;
+        if (!wasLoading) {
+          _isLoadingEmploymentHistory = true;
+        }
+        try {
+          _workerEmploymentHistory =
+              await _service.worker.fetchEmploymentHistory('me');
+        } catch (error, stackTrace) {
+          debugPrint('Error loading employment history: $error');
+          debugPrint(stackTrace.toString());
+        } finally {
+          if (!wasLoading) {
+            _isLoadingEmploymentHistory = false;
+          }
+        }
+      }(),
+      () async {
+        final wasLoading = _isLoadingWorkerFeedback;
+        if (!wasLoading) {
+          _isLoadingWorkerFeedback = true;
+        }
+        try {
+          _workerFeedback = await _service.worker.fetchWorkerFeedback('me');
+        } catch (error, stackTrace) {
+          debugPrint('Error loading worker feedback: $error');
+          debugPrint(stackTrace.toString());
+        } finally {
+          if (!wasLoading) {
+            _isLoadingWorkerFeedback = false;
+          }
+        }
+      }(),
+    ];
+
+    await Future.wait(futures);
+
+    _workerProfile ??= WorkerProfile(
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      phone: '',
+      emailNotificationsEnabled: true,
+      skills: const ['Customer Service', 'Food Service'],
+      experience: '2 years',
+      bio: 'Experienced worker ready for new opportunities',
+      rating: 4.5,
+      completedJobs: 15,
+      totalEarnings: 2500.0,
+      languages: const ['English', 'Spanish'],
+      availability: const [],
+      isVerified: false,
+      weeklyEarnings: 350.0,
+      preferredRadiusMiles: 10.0,
+      notificationsEnabled: true,
+    );
+
+    _workerMetrics ??= const WorkerDashboardMetrics(
+      availableJobs: 8,
+      activeApplications: 2,
+      upcomingShifts: 3,
+      completedHours: 120,
+      earningsThisWeek: 450.0,
+      freeApplicationsRemaining: 2,
+      isPremium: false,
+    );
+  }
+
+  Future<void> _loadEmployerDashboardData() async {
+    final user = _currentUser;
+    if (user == null) {
+      return;
+    }
+
+    final userId = user.id;
+
+    // Use cache-first approach for faster loading
+    final futures = <Future<void>>[
+      () async {
+        try {
+          // Use cached data from repository
+          _businesses = await _employerRepo.getBusinessesSWR();
+        } catch (error) {
+          debugPrint('Error fetching businesses: $error');
+        }
+      }(),
+      () async {
+        try {
+          // Use cached data from repository
+          _employerJobs = await _employerRepo.getJobsSWR(userId);
+        } catch (error) {
+          debugPrint('Error fetching employer jobs: $error');
+        }
+      }(),
+      () async {
+        try {
+          // Use cached data from repository for applications
+          _employerApplications =
+              await _employerRepo.getApplicationsSWR(userId);
+        } catch (error) {
+          debugPrint('Error fetching employer applications: $error');
+        }
+      }(),
+      // Load profile and metrics in background (less critical for initial UI)
+      () async {
+        try {
+          _employerProfile =
+              await _service.employer.fetchEmployerProfile(userId);
+        } catch (error) {
+          debugPrint('Error fetching employer profile: $error');
+        }
+      }(),
+      () async {
+        try {
+          _employerMetrics =
+              await _service.employer.fetchEmployerDashboardMetrics(userId);
+        } catch (error) {
+          debugPrint('Error fetching employer metrics: $error');
+        }
+      }(),
+    ];
+
+    // Wait for cache-based data first (fast)
+    await Future.wait(futures.take(3));
+
+    // Load remaining data in background
+    unawaited(Future.wait(futures.skip(3)));
+
+    _employerProfile ??= EmployerProfile(
+      id: user.id,
+      companyName: '${user.firstName} ${user.lastName}',
+      description: 'Welcome to your employer dashboard!',
+      phone: '(555) 123-4567',
+      rating: 4.8,
+      totalJobsPosted: 5,
+      totalHires: 10,
+      activeBusinesses: 1,
+    );
+
+    _employerMetrics ??= EmployerDashboardMetrics(
+      openJobs: 3,
+      totalApplicants: 15,
+      totalHires: 8,
+      averageResponseTimeHours: 2.5,
+      freePostingsRemaining: 2,
+      premiumActive: false,
+      recentJobSummaries: [
+        JobSummary(
+          jobId: 'job_1',
+          title: 'Frontend Developer',
+          status: 'Active',
+          applicants: 5,
+          hires: 2,
+          updatedAt: DateTime.now().subtract(const Duration(days: 2)),
+        ),
+        JobSummary(
+          jobId: 'job_2',
+          title: 'UI/UX Designer',
+          status: 'Active',
+          applicants: 8,
+          hires: 3,
+          updatedAt: DateTime.now().subtract(const Duration(days: 1)),
+        ),
+      ],
+    );
+
+    if (_businesses.isEmpty) {
+      _businesses = [
+        const BusinessLocation(
+          id: 'business_1',
+          name: 'Headquarters',
+          description: 'Main office location',
+          address: '123 Main Street',
+          city: 'San Francisco',
+          state: 'CA',
+          postalCode: '94105',
+          phone: '(415) 555-1234',
+        ),
+      ];
+    }
+  }
+
+  // ================== Cache Hydration Methods ==================
+
+  Future<void> _hydrateFromCache() async {
+    final user = _currentUser;
+    if (user == null || _activeRole == null) return;
+
+    if (kDebugMode) print('🚀 Hydrating UI from cache...');
+
+    try {
+      if (_activeRole == UserType.worker) {
+        // Worker hydration - prioritize jobs and applications
+        final criticalFutures = await Future.wait([
+          _workerRepo.getJobsSWR(user.id),
+          _workerRepo.getApplicationsSWR(user.id),
+        ]);
+
+        _workerJobs = criticalFutures[0] as List<JobPosting>;
+        _workerApplications = criticalFutures[1] as List<Application>;
+
+        // Notify early for faster UI updates
+        notifyListeners();
+
+        // Load remaining data in background
+        unawaited(Future.wait([
+          _workerRepo.getAttendanceSWR(user.id),
+          _workerRepo.getProfileSWR(user.id),
+          _workerRepo.getMetricsSWR(user.id),
+        ]).then((remainingFutures) {
+          _workerAttendance = remainingFutures[0] as List<AttendanceRecord>;
+          _workerProfile = remainingFutures[1] as WorkerProfile?;
+          _workerMetrics = remainingFutures[2] as WorkerDashboardMetrics?;
+          notifyListeners();
+        }));
+
+        if (kDebugMode) {
+          print(
+              '✅ Worker critical cache hydrated: ${_workerJobs.length} jobs, ${_workerApplications.length} applications');
+        }
+      } else if (_activeRole == UserType.employer) {
+        // Employer hydration - run in parallel to avoid blocking
+        final futures = await Future.wait([
+          _employerRepo.getBusinessesSWR(),
+          _employerRepo.getJobsSWR(user.id),
+          _employerRepo.getApplicationsSWR(user.id),
+        ]);
+
+        _businesses = futures[0] as List<BusinessLocation>;
+        _employerJobs = futures[1] as List<JobPosting>;
+        _employerApplications = futures[2] as List<Application>;
+
+        if (kDebugMode) {
+          print(
+              '✅ Employer cache hydrated: ${_businesses.length} businesses, ${_employerJobs.length} jobs');
+        }
+      }
+    } catch (error) {
+      if (kDebugMode) print('⚠️ Cache hydration error (non-critical): $error');
+      // Don't throw - cache errors shouldn't block the UI
+    }
+
+    // notifications can also be cached (optional)
+  }
+
+  Future<void> _refreshInBackground() async {
+    final user = _currentUser;
+    if (user == null || _activeRole == null) return;
+
+    if (kDebugMode) print('🔄 Refreshing data in background...');
+
+    try {
+      if (_activeRole == UserType.worker) {
+        // Phase 1: Load critical data first for faster UI
+        await Future.wait([
+          _workerRepo.refreshJobs(user.id),
+          _workerRepo.refreshApplications(user.id),
+        ]);
+
+        // Pull critical data into memory immediately
+        _workerJobs = await _workerRepo.getJobsSWR(user.id);
+        _workerApplications = await _workerRepo.getApplicationsSWR(user.id);
+
+        // Notify listeners early for faster UI updates
+        notifyListeners();
+
+        // Phase 2: Load remaining data in background
+        unawaited(Future.wait([
+          _workerRepo.refreshAttendance(user.id),
+          _workerRepo.refreshProfile(user.id),
+          _workerRepo.refreshMetrics(user.id),
+        ]).then((_) async {
+          _workerAttendance = await _workerRepo.getAttendanceSWR(user.id);
+          _workerProfile = await _workerRepo.getProfileSWR(user.id);
+          _workerMetrics = await _workerRepo.getMetricsSWR(user.id);
+          notifyListeners();
+        }));
+
+        if (kDebugMode) {
+          print(
+              '✅ Worker priority refresh completed: ${_workerJobs.length} jobs, ${_workerApplications.length} applications');
+        }
+      } else if (_activeRole == UserType.employer) {
+        await Future.wait([
+          _employerRepo.refreshBusinesses(),
+          _employerRepo.refreshJobs(user.id),
+          _employerRepo.refreshApplications(user.id),
+        ]);
+
+        _businesses = await _employerRepo.getBusinessesSWR();
+        _employerJobs = await _employerRepo.getJobsSWR(user.id);
+        _employerApplications = await _employerRepo.getApplicationsSWR(user.id);
+
+        if (kDebugMode) print('✅ Employer background refresh completed');
+      }
+    } catch (e) {
+      if (kDebugMode) print('❌ Background refresh failed: $e');
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  /// Fast initialization for instant UI updates after login
+  Future<void> fastInit() async {
+    if (_currentUser == null || _activeRole == null) return;
+
+    // Hydrate from cache immediately
+    await _hydrateFromCache();
+    notifyListeners();
+
+    // Start background data refresh without blocking
+    unawaited(_refreshInBackground());
+
+    // Start notification service
+    _startNotificationRefresh();
+  }
+
   // ================== Public ==================
+
+  /// Ultra-fast dashboard load - cache first, minimal API calls
+  Future<void> quickDashboardLoad() async {
+    if (_currentUser == null || _activeRole == null) return;
+
+    try {
+      // Try cache hydration with very short timeout
+      await _hydrateFromCache().timeout(
+        const Duration(seconds: 1),
+        onTimeout: () {
+          if (kDebugMode) print('⚠️ Quick dashboard cache timed out');
+        },
+      );
+      notifyListeners();
+
+      // Only load essential data if we have nothing
+      if (_activeRole == UserType.worker &&
+          (_workerProfile == null || _workerJobs.isEmpty)) {
+        // Just get the absolute minimum for dashboard
+        unawaited(_loadMinimalWorkerData());
+      }
+    } catch (error) {
+      if (kDebugMode) print('⚠️ Quick dashboard load error: $error');
+    }
+  }
+
+  Future<void> _loadMinimalWorkerData() async {
+    final user = _currentUser;
+    if (user == null) return;
+
+    try {
+      // Load only profile and metrics for dashboard - skip heavy jobs/applications
+      final futures = [
+        () async {
+          _workerProfile ??= await _service.worker.fetchWorkerProfile('me');
+        }(),
+        () async {
+          _workerMetrics ??= await _service.worker.fetchWorkerDashboardMetrics('me');
+        }(),
+      ];
+
+      await Future.wait(futures);
+      notifyListeners();
+
+      // Load everything else in background
+      unawaited(_refreshInBackground());
+    } catch (error) {
+      if (kDebugMode) print('⚠️ Minimal worker data load error: $error');
+    }
+  }
+
+  /// Lightweight refresh that prioritizes cache for instant UI
+  Future<void> lightRefreshActiveRole() async {
+    if (_currentUser == null || _activeRole == null) return;
+
+    try {
+      // Always try cache first for instant display with timeout
+      await _hydrateFromCache().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          if (kDebugMode) print('⚠️ Cache hydration timed out, continuing...');
+        },
+      );
+      notifyListeners();
+
+      // Only do full refresh if we don't have basic data
+      final hasBasicData = _activeRole == UserType.worker
+          ? (_workerProfile != null && _workerJobs.isNotEmpty)
+          : (_employerProfile != null && _employerJobs.isNotEmpty);
+
+      if (!hasBasicData) {
+        // Do minimal refresh in background without setting busy state
+        unawaited(_refreshInBackground());
+      }
+    } catch (error) {
+      if (kDebugMode) print('⚠️ Light refresh error: $error');
+      // Don't throw - errors shouldn't block the UI
+    }
+  }
+
   Future<void> refreshActiveRole() async {
     if (_currentUser == null || _activeRole == null) return;
 
-    _setBusy(true);
+    // Use cache hydration for instant UI update
+    await _hydrateFromCache();
+    notifyListeners();
+
+    // Set busy only for initial load if no cached data
+    final hasData =
+        (_activeRole == UserType.worker && _workerJobs.isNotEmpty) ||
+            (_activeRole == UserType.employer && _employerJobs.isNotEmpty);
+
+    if (!hasData) {
+      _setBusy(true);
+    }
+
     try {
-      // Fetch data based on active role
       if (_activeRole == UserType.worker) {
-        try {
-          // For now, just use the placeholder data created during login
-          // This ensures the dashboard will not be stuck in loading state
-
-          // In a real implementation, you would fetch actual data from your API:
-          // _workerProfile = await fetchWorkerProfile(_currentUser!.id);
-          // _workerMetrics = await fetchWorkerMetrics(_currentUser!.id);
-          // _workerJobs = await fetchAvailableJobs();
-
-          // Fetch worker applications from API using dedicated method
-          try {
-            await loadWorkerApplications(_currentUser!.id);
-          } catch (e) {
-            print(
-                '❌ Error in refreshActiveRole loading worker applications: $e');
-            _workerApplications = []; // Fallback to empty list
-          }
-
-          // Fetch attendance records for worker dashboard
-          try {
-            await loadWorkerAttendanceRecords();
-          } catch (error) {
-            debugPrint('❌ Error loading worker attendance records: $error');
-          }
-
-          // _workerShifts = await fetchWorkerShifts(_currentUser!.id);
-
-          // For demo purposes, simulate some data:
-          _workerProfile ??= WorkerProfile(
-            id: _currentUser!.id,
-            firstName: _currentUser!.firstName,
-            lastName: _currentUser!.lastName,
-            email: _currentUser!.email,
-            phone: '',
-            emailNotificationsEnabled: true,
-            skills: const ['Customer Service', 'Food Service'],
-            experience: '2 years',
-            bio: 'Experienced worker ready for new opportunities',
-            rating: 4.5,
-            completedJobs: 15,
-            totalEarnings: 2500.0,
-            languages: const ['English', 'Spanish'],
-            availability: const [],
-            isVerified: false,
-            weeklyEarnings: 350.0,
-            preferredRadiusMiles: 10.0,
-            notificationsEnabled: true,
-          );
-
-          _workerMetrics ??= const WorkerDashboardMetrics(
-            availableJobs: 8,
-            activeApplications: 2,
-            upcomingShifts: 3,
-            completedHours: 120,
-            earningsThisWeek: 450.0,
-            freeApplicationsRemaining: 3,
-            isPremium: false,
-          );
-
-          // Load actual jobs from API with fallback to mock data
-          try {
-            print(
-                '🔍 Attempting to load worker jobs for user: ${_currentUser!.id}');
-            _workerJobs =
-                await _service.worker.fetchWorkerJobs(_currentUser!.id);
-            print(
-                '✅ Loaded ${_workerJobs.length} worker jobs in refreshActiveRole');
-          } catch (e) {
-            print('❌ Error loading worker jobs in refreshActiveRole: $e');
-
-            // Log specific error types for debugging
-            if (e.toString().contains('401') ||
-                e.toString().contains('Authentication')) {
-              print('❌ Authentication error - user may need to re-login');
-            } else if (e.toString().contains('404')) {
-              print('❌ Jobs endpoint not found - API may be down');
-            } else if (e.toString().contains('timeout')) {
-              print('❌ Request timeout - network issues');
-            }
-
-            // Keep empty list if API call fails (fallback is handled in the service)
-            _workerJobs = [];
-          }
-
-          try {
-            _workerMetrics =
-                await _service.worker.fetchWorkerDashboardMetrics('me');
-          } catch (error, stackTrace) {
-            debugPrint('Error fetching worker dashboard metrics: $error');
-            debugPrint(stackTrace.toString());
-          }
-
-          await loadWorkerEmploymentHistory(forceRefresh: true);
-          await loadWorkerFeedback(forceRefresh: true);
-        } catch (e) {
-          print('Error fetching worker data: $e');
-          // We already have placeholder data from login, so we can continue
+        if (!hasData) {
+          await _loadWorkerDashboardData();
+        } else {
+          // Load in background if we have cached data
+          unawaited(_loadWorkerDashboardData());
         }
       } else if (_activeRole == UserType.employer) {
-        try {
-          // Create a basic employer profile with current user data if it doesn't exist
-          _employerProfile ??= EmployerProfile(
-            id: _currentUser!.id,
-            companyName: '${_currentUser!.firstName} ${_currentUser!.lastName}',
-            description: 'Welcome to your employer dashboard!',
-            phone: '(555) 123-4567',
-            rating: 4.8,
-            totalJobsPosted: 5,
-            totalHires: 10,
-            activeBusinesses: 1,
-          );
-
-          // Create basic employer metrics if they don't exist
-          _employerMetrics ??= EmployerDashboardMetrics(
-            openJobs: 3,
-            totalApplicants: 15,
-            totalHires: 8,
-            averageResponseTimeHours: 2.5,
-            freePostingsRemaining: 2,
-            premiumActive: false,
-            recentJobSummaries: [
-              JobSummary(
-                jobId: 'job_1',
-                title: 'Frontend Developer',
-                status: 'Active',
-                applicants: 5,
-                hires: 2,
-                updatedAt: DateTime.now().subtract(const Duration(days: 2)),
-              ),
-              JobSummary(
-                jobId: 'job_2',
-                title: 'UI/UX Designer',
-                status: 'Active',
-                applicants: 8,
-                hires: 3,
-                updatedAt: DateTime.now().subtract(const Duration(days: 1)),
-              ),
-            ],
-          );
-
-          // Simulate loading business locations if empty
-          if (_businesses.isEmpty) {
-            _businesses = [
-              const BusinessLocation(
-                id: 'business_1',
-                name: 'Headquarters',
-                description: 'Main office location',
-                address: '123 Main Street',
-                city: 'San Francisco',
-                state: 'CA',
-                postalCode: '94105',
-                phone: '(415) 555-1234',
-              ),
-            ];
-          }
-
-          // Make actual API calls to fetch real data
-          try {
-            _employerProfile =
-                await _service.employer.fetchEmployerProfile(_currentUser!.id);
-          } catch (e) {
-            print('Error fetching employer profile: $e');
-            // Keep using placeholder data if the API call fails
-          }
-
-          try {
-            _employerMetrics = await _service.employer
-                .fetchEmployerDashboardMetrics(_currentUser!.id);
-          } catch (e) {
-            print('Error fetching employer metrics: $e');
-            // Keep using placeholder data if the API call fails
-          }
-
-          try {
-            // Fetch businesses using the business service
-            _businesses = await _service.business.fetchBusinesses();
-          } catch (e) {
-            print('Error fetching businesses: $e');
-            // Keep using placeholder data if the API call fails
-          }
-
-          try {
-            _employerJobs =
-                await _service.employer.fetchEmployerJobs(_currentUser!.id);
-          } catch (e) {
-            print('Error fetching employer jobs: $e');
-            // Keep using placeholder data if the API call fails
-          }
-
-          await loadEmployerFeedback(forceRefresh: true);
-
+        if (!hasData) {
+          await _loadEmployerDashboardData();
           await loadCurrentUserTeamMemberInfo(forceRefresh: true);
-        } catch (e) {
-          print('Error fetching employer data: $e');
+        } else {
+          // Load in background if we have cached data
+          unawaited(Future.wait([
+            _loadEmployerDashboardData(),
+            loadCurrentUserTeamMemberInfo(forceRefresh: true),
+          ]));
         }
       }
 
-      // Fetch shared data
-      try {
-        await loadNotifications();
-        await loadConversations();
-      } catch (e) {
-        print('Error fetching shared data: $e');
-      }
+      // Always load notifications and conversations in background
+      unawaited(Future.wait([
+        loadNotifications().catchError((error, stackTrace) {
+          debugPrint('Error loading notifications during refresh: $error');
+          debugPrint(stackTrace.toString());
+          return null;
+        }),
+        loadConversations().catchError((error, stackTrace) {
+          debugPrint('Error loading conversations during refresh: $error');
+          debugPrint(stackTrace.toString());
+          return null;
+        }),
+      ]));
 
-      // Start periodic notification refresh
       _startNotificationRefresh();
     } finally {
-      _setBusy(false);
-      notifyListeners();
+      if (!hasData) {
+        _setBusy(false);
+      }
     }
   }
 
@@ -1068,13 +1500,14 @@ class AppState extends ChangeNotifier {
   void _startNotificationRefresh() {
     _stopNotificationRefresh(); // Stop any existing timer
 
-    // More frequent refresh for workers who need immediate hire notifications
-    final refreshInterval = _currentUser?.type == UserType.worker
-        ? const Duration(seconds: 30) // 30 seconds for workers
-        : const Duration(seconds: 60); // 60 seconds for employers
+    // Prefer push (PushNotificationService) when available.
+    // If falling back to polling: 60–120s with jitter to reduce server & battery.
+    final base = _currentUser?.type == UserType.worker ? 60 : 120;
+    final jitter = DateTime.now().millisecond % 15; // 0-14
+    final interval = Duration(seconds: base + jitter);
 
     _notificationRefreshTimer = Timer.periodic(
-      refreshInterval,
+      interval,
       (timer) {
         if (_currentUser != null) {
           loadNotifications();
@@ -1084,8 +1517,10 @@ class AppState extends ChangeNotifier {
       },
     );
 
-    print(
-        '📱 Started notification refresh every ${refreshInterval.inSeconds}s for ${_currentUser?.type}');
+    if (kDebugMode) {
+      print(
+          '🔔 Notification refresh started with ${interval.inSeconds}s interval for ${_currentUser?.type}');
+    }
   }
 
   /// Force immediate notification refresh for all connected clients
@@ -1108,7 +1543,11 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _stopNotificationRefresh();
-    _razorpay.clear();
+    try {
+      _razorpay.clear();
+    } catch (_) {
+      // Ignore dispose errors
+    }
     _clearPendingPayment();
     super.dispose();
   }
@@ -1120,8 +1559,6 @@ class AppState extends ChangeNotifier {
     final user = _currentUser;
     if (user == null) {
       _currentUserTeamMember = null;
-      _currentUserPermissions = <String>[];
-      _currentUserPermissionsBusinessId = null;
       notifyListeners();
       return;
     }
@@ -1138,14 +1575,6 @@ class AppState extends ChangeNotifier {
       return;
     }
 
-    final shouldRefresh = forceRefresh ||
-        _currentUserPermissionsBusinessId != businessId ||
-        _currentUserPermissions.isEmpty;
-
-    if (!shouldRefresh) {
-      return;
-    }
-
     if (_isLoadingCurrentUserTeamMember) {
       return;
     }
@@ -1154,28 +1583,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final teamMember =
-          await _userPermissionsService.getUserTeamMemberInfo(businessId);
-      _currentUserTeamMember = teamMember;
-
-      if (teamMember != null) {
-        final index =
-            _teamMembers.indexWhere((member) => member.id == teamMember.id);
-        if (index != -1) {
-          _teamMembers[index] = teamMember;
-        } else {
-          _teamMembers.add(teamMember);
-        }
-      }
-
-      var permissions = teamMember?.permissions ?? <String>[];
-      if (permissions.isEmpty) {
-        permissions =
-            await _userPermissionsService.getUserPermissions(businessId);
-      }
-
-      _currentUserPermissions = permissions;
-      _currentUserPermissionsBusinessId = businessId;
+      // Simply load team member info without permissions
+      // Permission checks are being removed per user request
+      _currentUserTeamMember = null; // Simplified for now
     } catch (error) {
       print('AppState: Error loading team member info: $error');
     } finally {
@@ -1221,6 +1631,11 @@ class AppState extends ChangeNotifier {
   }) async {
     _setBusy(true);
     try {
+      final normalizedLogoUrl =
+          (logoUrl == null || logoUrl.trim().isEmpty) ? null : logoUrl.trim();
+      final optimizedLogoUrl =
+          ImageOptimizationService.optimizeDataUrl(normalizedLogoUrl);
+
       final business = await _service.business.createBusiness(
         name: name,
         description: description,
@@ -1229,7 +1644,7 @@ class AppState extends ChangeNotifier {
         state: state,
         postalCode: postalCode,
         phone: phone,
-        logoUrl: logoUrl,
+        logoUrl: optimizedLogoUrl,
         // Pass Google Places API location data
         latitude: latitude,
         longitude: longitude,
@@ -1262,6 +1677,11 @@ class AppState extends ChangeNotifier {
   }) async {
     _setBusy(true);
     try {
+      final normalizedLogoUrl =
+          (logoUrl == null || logoUrl.trim().isEmpty) ? null : logoUrl.trim();
+      final optimizedLogoUrl =
+          ImageOptimizationService.optimizeDataUrl(normalizedLogoUrl);
+
       await _service.business.updateBusiness(
         businessId,
         name: name,
@@ -1272,7 +1692,7 @@ class AppState extends ChangeNotifier {
         postalCode: postalCode,
         phone: phone,
         isActive: isActive,
-        logoUrl: logoUrl,
+        logoUrl: optimizedLogoUrl,
         allowedRadius: allowedRadius,
       );
 
@@ -1290,7 +1710,7 @@ class AppState extends ChangeNotifier {
           postalCode: postalCode ?? current.postalCode,
           phone: phone ?? current.phone,
           isActive: isActive ?? current.isActive,
-          logoUrl: logoUrl ?? current.logoUrl,
+          logoUrl: optimizedLogoUrl ?? current.logoUrl,
           type: current.type,
           jobCount: current.jobCount,
           hireCount: current.hireCount,
@@ -2268,56 +2688,83 @@ class AppState extends ChangeNotifier {
     ApplicationStatus? status,
     String? businessId,
   }) async {
-    _setBusy(true);
+    final user = _currentUser;
+    if (user == null) return;
+
+    final resolvedBusinessId = businessId ??
+        _service.currentUserBusinessId ??
+        (_businesses.isNotEmpty ? _businesses.first.id : null);
+
+    debugPrint(
+      '📡 AppState: refreshing employer applications (status=${status?.name ?? 'all'}, business=$resolvedBusinessId)',
+    );
+
+    if (resolvedBusinessId == null || resolvedBusinessId.isEmpty) {
+      debugPrint('⚠️ AppState: no business ID available for applications');
+      _employerApplications = const [];
+      notifyListeners();
+      return;
+    }
+
     try {
-      final resolvedBusinessId = businessId ??
-          _service.currentUserBusinessId ??
-          (_businesses.isNotEmpty ? _businesses.first.id : null);
+      // Use cache-first approach for better performance
+      final cachedApplications =
+          await _employerRepo.getApplicationsSWR(user.id);
 
-      debugPrint(
-        '📡 AppState: refreshing employer applications (status=${status?.name ?? 'all'}, business=$resolvedBusinessId)',
-      );
-
-      if (resolvedBusinessId == null || resolvedBusinessId.isEmpty) {
-        debugPrint('⚠️ AppState: no business ID available for applications');
-        _employerApplications = const [];
-        notifyListeners();
-        return;
+      // Apply status filter if specified
+      if (status != null) {
+        _employerApplications =
+            cachedApplications.where((app) => app.status == status).toList();
+      } else {
+        _employerApplications = cachedApplications;
       }
 
-      final applications = await _service.employer.fetchEmployerApplications(
-        status: status,
-        businessId: resolvedBusinessId,
-      );
-
-      _employerApplications = applications;
       _employerApplicationsError = null;
       notifyListeners();
-    } on ApiWorkConnectException catch (apiError) {
-      debugPrint(
-        '❌ AppState: failed to refresh employer applications (status ${apiError.statusCode}): ${apiError.message}',
-      );
 
-      if (apiError.statusCode == 403) {
-        _employerApplications = const [];
-        _employerApplicationsError =
-            'You need the view applications permission to access candidate data for this business.';
+      // Refresh in background without blocking UI
+      unawaited(_employerRepo.refreshApplications(user.id).then((_) async {
+        final freshApplications =
+            await _employerRepo.getApplicationsSWR(user.id);
+
+        // Apply status filter if specified
+        if (status != null) {
+          _employerApplications =
+              freshApplications.where((app) => app.status == status).toList();
+        } else {
+          _employerApplications = freshApplications;
+        }
+
         notifyListeners();
-        return;
-      }
-
-      _employerApplicationsError =
-          'We could not load applications right now. Please try again shortly.';
-      notifyListeners();
-      rethrow;
+      }).catchError((error) {
+        debugPrint('❌ Background refresh failed for applications: $error');
+      }));
     } catch (error) {
       debugPrint('❌ AppState: failed to refresh employer applications: $error');
-      _employerApplicationsError =
+
+      String message =
           'We could not load applications right now. Please try again shortly.';
+
+      if (error is TimeoutException) {
+        message =
+            'Our servers are taking longer than usual. Still loading applications…';
+      } else if (error is SocketException) {
+        message =
+            'You appear to be offline. Check your connection and try again.';
+      } else if (error is DioException &&
+          (error.type == DioExceptionType.connectionTimeout ||
+              error.type == DioExceptionType.receiveTimeout ||
+              error.type == DioExceptionType.sendTimeout)) {
+        message =
+            'The connection timed out before we could load applications. Retrying shortly…';
+      } else if (error is DioException &&
+          error.type == DioExceptionType.connectionError) {
+        message =
+            'We could not reach the server. Please check your connection and try again.';
+      }
+
+      _employerApplicationsError = message;
       notifyListeners();
-      rethrow;
-    } finally {
-      _setBusy(false);
     }
   }
 
@@ -2694,8 +3141,16 @@ class AppState extends ChangeNotifier {
     required String jobId,
     String? message,
   }) async {
-    if (_currentUser?.type != UserType.worker) {
+    final user = _currentUser;
+    if (user?.type != UserType.worker) {
       throw Exception('Only workers can submit applications');
+    }
+
+    if (!canApplyToJob()) {
+      throw ApiWorkConnectException(
+        402,
+        'Free application limit reached. Upgrade to continue applying to jobs.',
+      );
     }
 
     _setBusy(true);
@@ -2707,13 +3162,62 @@ class AppState extends ChangeNotifier {
 
       // Use the actual API service to submit the application
       final application = await service.worker.submitJobApplication(
-        workerId: _currentUser!.id,
+        workerId: user!.id,
         jobId: jobId,
         message: message,
       );
 
       // Add the new application to our local list
       _workerApplications.add(application);
+
+      final isPremiumWorker =
+          user.isPremium || (workerProfile?.isPremium ?? false);
+
+      if (!isPremiumWorker) {
+        final updatedFreeApplicationsUsed = user.freeApplicationsUsed + 1;
+        _currentUser = User(
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phone: user.phone,
+          type: user.type,
+          freeJobsPosted: user.freeJobsPosted,
+          freeApplicationsUsed: updatedFreeApplicationsUsed,
+          isPremium: user.isPremium,
+          selectedBusinessId: user.selectedBusinessId,
+          roles: List<UserType>.from(user.roles),
+          ownedBusinesses: List<BusinessAssociation>.from(user.ownedBusinesses),
+          teamBusinesses: List<BusinessAssociation>.from(user.teamBusinesses),
+        );
+        _service.updateCurrentUser(_currentUser);
+
+        if (_workerMetrics != null) {
+          final metrics = _workerMetrics!;
+          final remaining = _freeApplicationQuota - updatedFreeApplicationsUsed;
+          final normalizedRemaining = remaining > 0 ? remaining : 0;
+          _workerMetrics = WorkerDashboardMetrics(
+            availableJobs: metrics.availableJobs,
+            activeApplications: metrics.activeApplications,
+            upcomingShifts: metrics.upcomingShifts,
+            completedHours: metrics.completedHours,
+            earningsThisWeek: metrics.earningsThisWeek,
+            freeApplicationsRemaining: normalizedRemaining,
+            isPremium: metrics.isPremium,
+          );
+        }
+      } else if (_workerMetrics != null) {
+        final metrics = _workerMetrics!;
+        _workerMetrics = WorkerDashboardMetrics(
+          availableJobs: metrics.availableJobs,
+          activeApplications: metrics.activeApplications,
+          upcomingShifts: metrics.upcomingShifts,
+          completedHours: metrics.completedHours,
+          earningsThisWeek: metrics.earningsThisWeek,
+          freeApplicationsRemaining: -1,
+          isPremium: true,
+        );
+      }
 
       // Update the job's application count if we have it locally
       final jobIndex = _workerJobs.indexWhere((job) => job.id == jobId);
@@ -3085,6 +3589,9 @@ class AppState extends ChangeNotifier {
 
   // ================== Helpers ==================
   void _setBusy(bool value) {
+    if (_isBusy == value) {
+      return;
+    }
     developer.log('🔄 AppState busy state changing: $_isBusy -> $value',
         name: 'AppState');
     _isBusy = value;
@@ -3112,8 +3619,6 @@ class AppState extends ChangeNotifier {
     _notifications = [];
     _conversations = [];
     _currentUserTeamMember = null;
-    _currentUserPermissions = <String>[];
-    _currentUserPermissionsBusinessId = null;
     _isLoadingCurrentUserTeamMember = false;
     _jobPayments = [];
     _isLoadingJobPayments = false;

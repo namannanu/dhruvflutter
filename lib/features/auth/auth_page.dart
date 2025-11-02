@@ -104,6 +104,32 @@ class _SignInFormState extends State<_SignInForm> {
                   ? null
                   : () async {
                       if (_formKey.currentState?.validate() ?? false) {
+                        // Show loading snackbar
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Row(
+                              children: [
+                                SizedBox(
+                                  height: 16,
+                                  width: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.white),
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Text('Signing you in...'),
+                              ],
+                            ),
+                            backgroundColor: Colors.blue,
+                            behavior: SnackBarBehavior.floating,
+                            duration: Duration(
+                                seconds:
+                                    10), // Will be dismissed when login completes
+                          ),
+                        );
+
                         try {
                           final message = await context.read<AppState>().login(
                                 email: _emailController.text,
@@ -112,34 +138,133 @@ class _SignInFormState extends State<_SignInForm> {
 
                           if (!mounted) return;
 
+                          // Hide loading snackbar
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
                           final isSuccess = message == 'Login successful';
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text(message),
+                              content: Row(
+                                children: [
+                                  Icon(
+                                    isSuccess
+                                        ? Icons.check_circle
+                                        : Icons.error,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: Text(message)),
+                                ],
+                              ),
                               backgroundColor:
                                   isSuccess ? Colors.green : Colors.red,
+                              behavior: SnackBarBehavior.floating,
+                              duration: Duration(seconds: isSuccess ? 2 : 4),
+                              action: isSuccess
+                                  ? null
+                                  : SnackBarAction(
+                                      label: 'Dismiss',
+                                      textColor: Colors.white,
+                                      onPressed: () {
+                                        ScaffoldMessenger.of(context)
+                                            .hideCurrentSnackBar();
+                                      },
+                                    ),
                             ),
                           );
                         } on HandshakeException catch (_) {
                           if (!mounted) return;
+
+                          // Hide loading snackbar
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Secure connection failed. Check your internet connection or VPN and try again.',
+                            SnackBar(
+                              content: const Row(
+                                children: [
+                                  Icon(Icons.security,
+                                      color: Colors.white, size: 20),
+                                  SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Secure connection failed. Check your internet connection or VPN and try again.',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              backgroundColor: Colors.orange,
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 4),
+                              action: SnackBarAction(
+                                label: 'Dismiss',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context)
+                                      .hideCurrentSnackBar();
+                                },
                               ),
                             ),
                           );
                         } on SocketException catch (error) {
                           if (!mounted) return;
+
+                          // Hide loading snackbar
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text('Network error: ${error.message}'),
+                              content: Row(
+                                children: [
+                                  const Icon(Icons.wifi_off,
+                                      color: Colors.white, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                      child: Text(
+                                          'Network error: ${error.message}')),
+                                ],
+                              ),
+                              backgroundColor: Colors.red,
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 4),
+                              action: SnackBarAction(
+                                label: 'Retry',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context)
+                                      .hideCurrentSnackBar();
+                                },
+                              ),
                             ),
                           );
                         } catch (error) {
                           if (!mounted) return;
+
+                          // Hide loading snackbar
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Login failed: $error')),
+                            SnackBar(
+                              content: Row(
+                                children: [
+                                  const Icon(Icons.error,
+                                      color: Colors.white, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: Text('Login failed: $error')),
+                                ],
+                              ),
+                              backgroundColor: Colors.red,
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 4),
+                              action: SnackBarAction(
+                                label: 'Dismiss',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context)
+                                      .hideCurrentSnackBar();
+                                },
+                              ),
+                            ),
                           );
                         }
                       }
@@ -302,6 +427,32 @@ class _SignUpFormState extends State<_SignUpForm> {
                   ? null
                   : () async {
                       if (_formKey.currentState?.validate() ?? false) {
+                        // Show loading snackbar
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Row(
+                              children: [
+                                SizedBox(
+                                  height: 16,
+                                  width: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.white),
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Text('Creating your account...'),
+                              ],
+                            ),
+                            backgroundColor: Colors.blue,
+                            behavior: SnackBarBehavior.floating,
+                            duration: Duration(
+                                seconds:
+                                    10), // Will be dismissed when signup completes
+                          ),
+                        );
+
                         try {
                           await context.read<AppState>().signup(
                                 email: _emailController.text,
@@ -313,10 +464,58 @@ class _SignUpFormState extends State<_SignUpForm> {
                                     ? null
                                     : _phoneController.text,
                               );
+
+                          if (!mounted) return;
+
+                          // Hide loading snackbar
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Row(
+                                children: [
+                                  Icon(Icons.check_circle,
+                                      color: Colors.white, size: 20),
+                                  SizedBox(width: 8),
+                                  Expanded(
+                                      child: Text(
+                                          'Account created successfully! Welcome!')),
+                                ],
+                              ),
+                              backgroundColor: Colors.green,
+                              behavior: SnackBarBehavior.floating,
+                              duration: Duration(seconds: 3),
+                            ),
+                          );
                         } catch (error) {
                           if (!mounted) return;
+
+                          // Hide loading snackbar
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Signup failed: $error')),
+                            SnackBar(
+                              content: Row(
+                                children: [
+                                  const Icon(Icons.error,
+                                      color: Colors.white, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                      child: Text('Signup failed: $error')),
+                                ],
+                              ),
+                              backgroundColor: Colors.red,
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 4),
+                              action: SnackBarAction(
+                                label: 'Dismiss',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context)
+                                      .hideCurrentSnackBar();
+                                },
+                              ),
+                            ),
                           );
                         }
                       }

@@ -1,4 +1,4 @@
-// ignore_for_file: directives_ordering, unused_field, annotate_overrides, unawaited_futures, require_trailing_commas
+// ignore_for_file: directives_ordering, unused_field, annotate_overrides, unawaited_futures, require_trailing_commas, avoid_print
 
 import 'dart:async';
 import 'dart:convert';
@@ -202,6 +202,38 @@ class ApiAuthService implements AuthService {
     }
   }
 
+  /// Load business data separately for faster login
+  Future<Map<String, List<BusinessAssociation>>> loadUserBusinesses() async {
+    try {
+      final response = await _api.get('/auth/businesses');
+      final responseData = response.data;
+      final data = responseData['data'] as Map<String, dynamic>?;
+
+      if (data == null) {
+        throw Exception('Invalid business data response from server');
+      }
+
+      final ownedBusinesses = BusinessAssociation.parseList(
+        data['ownedBusinesses'] as List<dynamic>?,
+      );
+      final teamBusinesses = BusinessAssociation.parseList(
+        data['teamBusinesses'] as List<dynamic>?,
+      );
+
+      return {
+        'ownedBusinesses': ownedBusinesses,
+        'teamBusinesses': teamBusinesses,
+      };
+    } catch (error) {
+      print('⚠️ Failed to load business data: $error');
+      // Return empty lists if business loading fails
+      return {
+        'ownedBusinesses': <BusinessAssociation>[],
+        'teamBusinesses': <BusinessAssociation>[],
+      };
+    }
+  }
+
   @override
   Future<User> signup({
     required String firstname,
@@ -389,7 +421,7 @@ class ApiAuthService implements AuthService {
         upcomingShifts: 0,
         completedHours: 0,
         earningsThisWeek: 0,
-        freeApplicationsRemaining: (3 - user.freeApplicationsUsed).clamp(0, 3),
+        freeApplicationsRemaining: (2 - user.freeApplicationsUsed).clamp(0, 2),
         isPremium: user.isPremium,
       );
     }
@@ -400,7 +432,7 @@ class ApiAuthService implements AuthService {
       upcomingShifts: 0,
       completedHours: 0,
       earningsThisWeek: profile.weeklyEarnings,
-      freeApplicationsRemaining: (3 - user.freeApplicationsUsed).clamp(0, 3),
+      freeApplicationsRemaining: (2 - user.freeApplicationsUsed).clamp(0, 2),
       isPremium: user.isPremium,
     );
   }

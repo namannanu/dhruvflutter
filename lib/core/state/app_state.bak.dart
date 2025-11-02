@@ -100,7 +100,7 @@ class AppState extends ChangeNotifier {
           isVerified: false,
           notificationsEnabled: true,
           preferredRadiusMiles: 10.0,
-          availability: const [], 
+          availability: const [],
           emailNotificationsEnabled: true,
         );
 
@@ -111,7 +111,7 @@ class AppState extends ChangeNotifier {
           upcomingShifts: 0,
           completedHours: 0,
           earningsThisWeek: 0.0,
-          freeApplicationsRemaining: 3,
+          freeApplicationsRemaining: 2,
           isPremium: false,
         );
       }

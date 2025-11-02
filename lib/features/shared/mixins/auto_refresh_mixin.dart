@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 
@@ -12,8 +14,8 @@ mixin AutoRefreshMixin<T extends StatefulWidget> on State<T> {
   /// Flag to track if a refresh is currently in progress
   bool _isRefreshing = false;
 
-  /// The duration between auto-refreshes. Default is 60 seconds.
-  Duration get refreshInterval => const Duration(seconds: 60);
+  /// The duration between auto-refreshes. Default is 5 minutes to reduce load.
+  Duration get refreshInterval => const Duration(minutes: 5);
 
   /// Override this method to implement the data refresh logic
   Future<void> refreshData();
@@ -51,11 +53,19 @@ mixin AutoRefreshMixin<T extends StatefulWidget> on State<T> {
 
   /// Triggers a refresh if one is not already in progress
   Future<void> _triggerRefresh() async {
-    if (_isRefreshing) return; // Prevent multiple simultaneous refreshes
+    if (_isRefreshing) {
+      print('🔄 AutoRefresh: Skipping refresh - already in progress');
+      return; // Prevent multiple simultaneous refreshes
+    }
 
     _isRefreshing = true;
+    print('🔄 AutoRefresh: Starting refresh cycle');
     try {
       await refreshData();
+      print('✅ AutoRefresh: Refresh completed successfully');
+    } catch (error) {
+      print('❌ AutoRefresh: Refresh failed - $error');
+      // Don't rethrow to prevent app crashes
     } finally {
       _isRefreshing = false;
     }

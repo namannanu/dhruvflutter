@@ -1,18 +1,114 @@
-// ignore_for_file: require_trailing_commas, deprecated_member_use
+// ignore_for_file: require_trailing_commas, deprecated_member_use, avoid_print
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
-import 'package:talent/debug_applications_screen.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/worker/screens/premium_plan_screen.dart';
 import 'package:talent/features/worker/screens/worker_profile_screen_new.dart';
 import 'package:talent/features/worker/screens/worker_settings_screen.dart';
 
-class WorkerDashboardScreen extends StatelessWidget {
+class WorkerDashboardScreen extends StatefulWidget {
   const WorkerDashboardScreen({super.key});
+
+  @override
+  State<WorkerDashboardScreen> createState() => _WorkerDashboardScreenState();
+}
+
+class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
+  bool _isRefreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Immediate cache-first load for instant UI
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _quickCacheLoad();
+    });
+  }
+
+  Future<void> _quickCacheLoad() async {
+    if (!mounted) return;
+
+    try {
+      final appState = context.read<AppState>();
+
+      // Try the new ultra-fast dashboard load
+      await appState.quickDashboardLoad();
+
+      // If we still don't have profile data, fall back to light refresh
+      if (appState.workerProfile == null) {
+        await appState.lightRefreshActiveRole().timeout(
+          const Duration(seconds: 3),
+          onTimeout: () {
+            print('⚠️ Fallback load timed out');
+          },
+        );
+      }
+    } catch (error) {
+      print('❌ Quick cache load error: $error');
+      // Final fallback to light refresh
+      await _lightRefresh();
+    }
+  }
+
+  void _backgroundRefresh() {
+    // Non-blocking background refresh
+    Future.delayed(const Duration(milliseconds: 100), () async {
+      if (!mounted) return;
+      try {
+        final appState = context.read<AppState>();
+        await appState.lightRefreshActiveRole();
+      } catch (error) {
+        print('🔄 Background refresh completed with minor issues: $error');
+      }
+    });
+  }
+
+  Future<void> _lightRefresh() async {
+    if (_isRefreshing || !mounted) return;
+
+    setState(() => _isRefreshing = true);
+    try {
+      final appState = context.read<AppState>();
+      // Use the new lightweight refresh method with timeout
+      await appState.lightRefreshActiveRole().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          print('⚠️ Light refresh timed out');
+        },
+      );
+    } catch (error) {
+      print('❌ Light refresh error: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
+    }
+  }
+
+  Future<void> _fullRefresh() async {
+    if (_isRefreshing || !mounted) return;
+
+    setState(() => _isRefreshing = true);
+    try {
+      final appState = context.read<AppState>();
+      await appState.refreshActiveRole().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          print('⚠️ Full refresh timed out');
+        },
+      );
+    } catch (error) {
+      print('❌ Full refresh error: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,27 +116,15 @@ class WorkerDashboardScreen extends StatelessWidget {
     final metrics = appState.workerMetrics;
     final profile = appState.workerProfile;
 
+    // Show loading only if we truly have no data at all
     if (profile == null) {
-      // Display a more informative loading screen
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Worker Dashboard'),
+          title: const Text('Dashboard'),
           actions: [
             IconButton(
-              icon: const Icon(Icons.bug_report, color: Colors.red),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const DebugApplicationsScreen(),
-                  ),
-                );
-              },
-              tooltip: 'Debug Applications',
-            ),
-            IconButton(
               icon: const Icon(Icons.refresh),
-              onPressed: () => context.read<AppState>().refreshActiveRole(),
+              onPressed: _fullRefresh,
               tooltip: 'Refresh',
             ),
             IconButton(
@@ -62,22 +146,23 @@ class WorkerDashboardScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const CircularProgressIndicator(),
-              const SizedBox(height: 20),
-              Text('Loading profile data...',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 10),
-              TextButton(
-                onPressed: () async {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Refreshing data...'),
-                      duration: Duration(seconds: 1),
+              const SizedBox(height: 16),
+              Text(
+                'Loading your dashboard...',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Getting your latest data',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey.shade600,
                     ),
-                  );
-                  // Call refreshActiveRole which now properly initializes data
-                  await context.read<AppState>().refreshActiveRole();
-                },
-                child: const Text('Tap to refresh'),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _fullRefresh,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
               ),
             ],
           ),
@@ -85,10 +170,22 @@ class WorkerDashboardScreen extends StatelessWidget {
       );
     }
 
+    // At this point we know profile is not null
+    // Show fallback metrics while loading
+    final safeMetrics = metrics ??
+        const WorkerDashboardMetrics(
+          availableJobs: 0,
+          activeApplications: 0,
+          upcomingShifts: 0,
+          completedHours: 0,
+          earningsThisWeek: 0.0,
+          freeApplicationsRemaining: 2,
+          isPremium: false,
+        );
     final currency = NumberFormat.simpleCurrency();
 
     return RefreshIndicator(
-      onRefresh: () async => context.read<AppState>().refreshActiveRole(),
+      onRefresh: _fullRefresh,
       child: ListView(
         padding: const EdgeInsets.all(24),
         children: [
@@ -132,7 +229,7 @@ class WorkerDashboardScreen extends StatelessWidget {
                   Expanded(
                     child: _MetricCard(
                       label: 'Available jobs',
-                      value: metrics!.availableJobs.toString(),
+                      value: safeMetrics.availableJobs.toString(),
                       icon: Icons.work_outline,
                     ),
                   ),
@@ -140,7 +237,7 @@ class WorkerDashboardScreen extends StatelessWidget {
                   Expanded(
                     child: _MetricCard(
                       label: 'Active applications',
-                      value: metrics.activeApplications.toString(),
+                      value: safeMetrics.activeApplications.toString(),
                       icon: Icons.assignment_outlined,
                     ),
                   ),
@@ -152,7 +249,7 @@ class WorkerDashboardScreen extends StatelessWidget {
                   Expanded(
                     child: _MetricCard(
                       label: 'Upcoming shifts',
-                      value: metrics.upcomingShifts.toString(),
+                      value: safeMetrics.upcomingShifts.toString(),
                       icon: Icons.schedule,
                     ),
                   ),
@@ -160,7 +257,7 @@ class WorkerDashboardScreen extends StatelessWidget {
                   Expanded(
                     child: _MetricCard(
                       label: 'Hours completed',
-                      value: metrics.completedHours.toStringAsFixed(0),
+                      value: safeMetrics.completedHours.toStringAsFixed(0),
                       icon: Icons.timer,
                     ),
                   ),
@@ -171,18 +268,18 @@ class WorkerDashboardScreen extends StatelessWidget {
                 children: [
                   Expanded(
                     child: _MetricCard(
-                      label: 'Earnings this week',
-                      value: currency.format(metrics.earningsThisWeek),
-                      icon: Icons.payments_outlined,
+                      label: 'This week earnings',
+                      value: currency.format(safeMetrics.earningsThisWeek),
+                      icon: Icons.attach_money,
                     ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: _MetricCard(
                       label: 'Free applications left',
-                      value: metrics.freeApplicationsRemaining.toString(),
-                      icon: Icons.workspace_premium_outlined,
-                      highlight: metrics.freeApplicationsRemaining == 0,
+                      value: safeMetrics.freeApplicationsRemaining.toString(),
+                      icon: Icons.free_breakfast,
+                      highlight: safeMetrics.freeApplicationsRemaining == 0,
                     ),
                   ),
                 ],
@@ -192,13 +289,6 @@ class WorkerDashboardScreen extends StatelessWidget {
 
           const SizedBox(height: 32),
 
-          // Action center
-          const SectionHeader(
-            title: 'Action center',
-            subtitle: 'Pick up where you left off',
-          ),
-          const SizedBox(height: 16),
-
           _ActionCard(
             title: 'Complete your profile',
             description:
@@ -207,16 +297,14 @@ class WorkerDashboardScreen extends StatelessWidget {
             buttonLabel: 'Update profile',
             onTap: () {
               Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const WorkerProfileScreen(),
-                ),
-              );
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => const WorkerProfileScreen()));
             },
           ),
 
           _ActionCard(
-            title: 'Unlock premium applications',
+            title: ' Unlock premium applications',
             description: () {
               final remainingApplications = appState.getRemainingApplications();
               final isPremium = profile.isPremium;
@@ -242,7 +330,7 @@ class WorkerDashboardScreen extends StatelessWidget {
 
               // Refresh data if premium was activated
               if (result == true) {
-                await appState.refreshActiveRole();
+                await _fullRefresh();
               }
             },
           ),
@@ -253,6 +341,7 @@ class WorkerDashboardScreen extends StatelessWidget {
           const SectionHeader(
             title: 'Attendance insights',
             subtitle: 'Track hours and lateness',
+            style: TextStyle(fontSize: 10),
           ),
           const SizedBox(height: 16),
           ...appState.workerAttendance

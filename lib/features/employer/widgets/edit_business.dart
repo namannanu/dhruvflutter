@@ -1,11 +1,13 @@
-// ignore_for_file: avoid_print, use_build_context_synchronously
+// ignore_for_file: use_build_context_synchronously
 
 import 'dart:convert';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
+import 'package:talent/core/services/image_optimization_service.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 
@@ -142,9 +144,18 @@ class _EditBusinessState extends State<EditBusiness> {
 
       final mime = file.mimeType ?? _lookupMimeType(file.name);
       final dataUrl = 'data:$mime;base64,${base64Encode(bytes)}';
+      final optimized =
+          ImageOptimizationService.optimizeDataUrl(dataUrl) ?? dataUrl;
+
+      if (kDebugMode) {
+        debugPrint(
+          '📉 Optimized business logo data URL to '
+          '${optimized.length} chars (was ${dataUrl.length})',
+        );
+      }
 
       setState(() {
-        _logoUrlController.text = dataUrl;
+        _logoUrlController.text = optimized;
       });
     } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(

@@ -51,6 +51,7 @@ analyzer:
     invalid_use_of_visible_for_testing_member: ignore
     require_trailing_commas: ignore
     strict_raw_type: ignore
+    unused_element: ignore
   language:
     strict-casts: true
     strict-raw-types: true

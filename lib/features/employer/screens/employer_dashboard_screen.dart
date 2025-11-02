@@ -3,10 +3,12 @@
 import 'dart:convert';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
+import 'package:talent/core/services/image_optimization_service.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/features/employer/widgets/edit_business.dart';
 import 'package:talent/features/employer/widgets/work_location_picker.dart';
@@ -27,16 +29,22 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
   @override
   Future<void> refreshData() async {
     if (mounted) {
-      await context.read<AppState>().refreshActiveRole();
+      final appState = context.read<AppState>();
+      
+      // Use fast initialization instead of blocking refreshActiveRole
+      await appState.fastInit();
     }
   }
 
   @override
   void initState() {
     super.initState();
-    // Trigger initial data load
+    // Trigger fast initial data load - no blocking
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      refreshData();
+      if (mounted) {
+        // Use fast init that shows cached data immediately
+        context.read<AppState>().fastInit();
+      }
     });
   }
 
@@ -243,39 +251,11 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
               ],
             ),
             const SizedBox(height: 32),
-            const SectionHeader(
-              title: 'Recent jobs',
-              subtitle: 'Monitor health across open postings',
-            ),
-            const SizedBox(height: 12),
-            if (metrics.recentJobSummaries.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('No recent jobs. Create your first job posting!'),
-                ),
-              )
-            else
-              ...metrics.recentJobSummaries.map(
-                (job) => Card(
-                  child: ListTile(
-                    title: Text(job.title),
-                    subtitle: Text(
-                      '${job.applicants} applicants · ${job.hires} hires',
-                    ),
-                    trailing: Chip(
-                      label: Text(
-                        job.status[0].toUpperCase() + job.status.substring(1),
-                      ),
-                    ),
-                    onTap: () => context.read<AppState>().selectJob(job.jobId),
-                  ),
-                ),
-              ),
-            const SizedBox(height: 24),
+            
+
             const SectionHeader(
               title: 'Business locations',
-              subtitle: 'Manage hiring context and analytics',
+              subtitle: 'Manage hiring context and analytics', style: TextStyle(fontSize: 10),
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
@@ -458,8 +438,18 @@ class _AddBusinessState extends State<_AddBusiness> {
 
       final mime = file.mimeType ?? _lookupMimeType(file.name);
       final dataUrl = 'data:$mime;base64,${base64Encode(bytes)}';
+      final optimized =
+          ImageOptimizationService.optimizeDataUrl(dataUrl) ?? dataUrl;
+
+      if (kDebugMode) {
+        debugPrint(
+          '📉 Optimized dashboard logo data URL to '
+          '${optimized.length} chars (was ${dataUrl.length})',
+        );
+      }
+
       setState(() {
-        _logoUrlController.text = dataUrl;
+        _logoUrlController.text = optimized;
       });
     } catch (error, stackTrace) {
       print('Error picking logo: $error'); // Debug log

@@ -1,5 +1,7 @@
 part of 'app_state.dart';
 
+const int _freeApplicationQuota = 2;
+
 extension PaymentExtensions on AppState {
   ServiceLocator get _service => ServiceLocator.instance;
   Future<String> createRazorpayOrder({
@@ -228,26 +230,33 @@ extension PaymentExtensions on AppState {
 
   // Check application limit for non-premium users
   bool canApplyToJob() {
-    final profile = workerProfile;
-    if (profile == null) return false;
+    final user = currentUser;
+    if (user == null || user.type != UserType.worker) {
+      return false;
+    }
 
-    // Premium users can apply to unlimited jobs
-    if (profile.isPremium) return true;
+    final isPremiumWorker =
+        user.isPremium || (workerProfile?.isPremium ?? false);
+    if (isPremiumWorker) {
+      return true;
+    }
 
-    // Free users can apply to maximum 2 jobs
-    final applicationsCount = workerApplications.length;
-    return applicationsCount < 2;
+    return user.freeApplicationsUsed < _freeApplicationQuota;
   }
 
   int getRemainingApplications() {
-    final profile = workerProfile;
-    if (profile == null) return 0;
+    final user = currentUser;
+    if (user == null || user.type != UserType.worker) {
+      return 0;
+    }
 
-    // Premium users have unlimited applications
-    if (profile.isPremium) return -1; // -1 indicates unlimited
+    final isPremiumWorker =
+        user.isPremium || (workerProfile?.isPremium ?? false);
+    if (isPremiumWorker) {
+      return -1; // Unlimited
+    }
 
-    // Free users can apply to maximum 2 jobs
-    final applicationsCount = workerApplications.length;
-    return (2 - applicationsCount).clamp(0, 2);
+    final remaining = _freeApplicationQuota - user.freeApplicationsUsed;
+    return remaining > 0 ? remaining : 0;
   }
 }

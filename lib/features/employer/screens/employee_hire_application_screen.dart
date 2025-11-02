@@ -1,5 +1,6 @@
 // ignore_for_file: use_build_context_synchronously, avoid_print, prefer_final_locals
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -32,12 +33,30 @@ class _EmployeeHireApplicationScreenState
   }
 
   Future<void> _loadApplications({bool silent = false}) async {
-    setState(() {
-      _isLoading = true;
-    });
+    final appState = context.read<AppState>();
+
+    // For better performance, try to get cached data first
+    try {
+      final cachedApps =
+          await appState.getCachedApplications(status: _statusFilter);
+      if (cachedApps.isNotEmpty && mounted) {
+        // Update UI immediately with cached data
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (kDebugMode) print('Failed to load cached applications: $e');
+    }
+
+    // Only set loading if we don't have cached data
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     try {
-      final appState = context.read<AppState>();
       final businessId = appState.service.currentUserBusinessId ??
           (appState.businesses.isNotEmpty
               ? appState.businesses.first.id
@@ -76,7 +95,8 @@ class _EmployeeHireApplicationScreenState
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
-    final applications = appState.employerApplications;
+    // Use optimized getter for better performance
+    final applications = appState.getApplicationsByStatus(_statusFilter);
     final applicationsError = appState.employerApplicationsError;
     final filtered = _statusFilter == null
         ? applications
@@ -92,14 +112,14 @@ class _EmployeeHireApplicationScreenState
         children: [
           const SectionHeader(
             title: 'Candidate applications',
-            subtitle: 'Review applicants and move quickly on hiring decisions',
+            subtitle: 'Review applicants and move quickly on hiring decisions', style: TextStyle(fontSize: 10),
           ),
           const SizedBox(height: 16),
           _StatusFilterChips(
             selected: _statusFilter,
             onSelected: _updateFilter,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
             child: _isLoading
@@ -200,7 +220,7 @@ class _EmptyApplicationsMessage extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(Icons.lock_outline, size: 48),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Text(
                   'Access restricted',
                   style: Theme.of(context).textTheme.titleMedium,
@@ -234,7 +254,7 @@ class _EmptyApplicationsMessage extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.assignment_outlined, size: 48),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               message,
               style: Theme.of(context).textTheme.titleMedium,
@@ -338,7 +358,7 @@ class _EmployerApplicationCardState extends State<_EmployerApplicationCard> {
               const Text(
                 'The candidate will be notified. You can optionally share a reason.',
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               TextField(
                 controller: controller,
                 maxLines: 3,
@@ -592,13 +612,12 @@ class _EmployerApplicationCardState extends State<_EmployerApplicationCard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     CircleAvatar(
-                      radius: 24,
+                      radius: 20,
                       child: Text(initials),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -606,136 +625,57 @@ class _EmployerApplicationCardState extends State<_EmployerApplicationCard> {
                           Text(
                             application.workerName,
                             style: theme.textTheme.titleMedium,
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 2,
                           ),
-                          if (application.workerExperience.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                application.workerExperience,
-                                style: theme.textTheme.bodyMedium,
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 2,
-                              ),
-                            ),
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              'Applied $submittedLabel',
-                              style: theme.textTheme.bodySmall,
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                            ),
+                          Text(
+                            'Applied ${DateFormat.yMd().format(application.submittedAt)}',
+                            style: theme.textTheme.bodySmall,
                           ),
                         ],
                       ),
                     ),
-                    Flexible(
-                      child: _StatusPill(
-                        color: statusColor,
-                        label: _statusLabel(application.status),
-                      ),
+                    _StatusPill(
+                      color: statusColor,
+                      label: _statusLabel(application.status),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    const Icon(Icons.badge_outlined, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Application ${_shortId(application.id)}',
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(Icons.work_outline, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Job ID: ${application.jobId}',
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                      ),
-                    ),
-                  ],
-                ),
-                if (application.workerSkills.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: application.workerSkills
-                        .take(6)
-                        .map((skill) => Chip(label: Text(skill)))
-                        .toList(),
+                const SizedBox(height: ),
+                if (application.note?.isNotEmpty == true)
+                  Text(
+                    application.note!,
+                    style: theme.textTheme.bodyMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
-                const SizedBox(height: 12),
-                Text(
-                  application.note?.isNotEmpty == true
-                      ? application.note!
-                      : 'No message from the candidate.',
-                  style: theme.textTheme.bodyMedium,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                ),
                 const SizedBox(height: 16),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
+                Row(
                   children: [
-                    FilledButton.icon(
-                      onPressed:
-                          canHire && _pendingAction == null ? _hire : null,
-                      icon: _ActionIcon(
-                        isActive: _pendingAction == ApplicationStatus.hired,
-                        icon: Icons.check_circle_outline,
+                    if (canHire)
+                      FilledButton(
+                        onPressed: _pendingAction == null ? _hire : null,
+                        child: _pendingAction == ApplicationStatus.hired
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Hire'),
                       ),
-                      label: const Text('Hire'),
+                    const SizedBox(width: 8),
+                    if (canReject)
+                      OutlinedButton(
+                        onPressed: _pendingAction == null ? _reject : null,
+                        child: const Text('Reject'),
+                      ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: _openWorkerProfile,
+                      child: const Text('View Profile'),
                     ),
-                    OutlinedButton.icon(
-                      onPressed:
-                          canReject && _pendingAction == null ? _reject : null,
-                      icon: _ActionIcon(
-                        isActive: _pendingAction == ApplicationStatus.rejected,
-                        icon: Icons.close,
-                      ),
-                      label: const Text('Reject'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _pendingAction == null ? _openWorkerProfile : null,
-                      icon: const Icon(Icons.person_search_outlined),
-                      label: const Text('View profile'),
-                    ),
-
-                    if (canRestore)
-                      TextButton.icon(
-                        onPressed:
-                            _pendingAction == null ? _restoreToPending : null,
-                        icon: _ActionIcon(
-                          isActive: _pendingAction == ApplicationStatus.pending,
-                          icon: Icons.refresh,
-                        ),
-                        label: const Text('Mark pending'),
-                      ),
-                    if (application.status == ApplicationStatus.hired)
-                      FilledButton.tonalIcon(
-                        onPressed:
-                            _pendingAction == null ? _scheduleAttendance : null,
-                        icon: const Icon(Icons.schedule),
-                        label: const Text('Schedule Shift'),
-                      ),
                   ],
                 ),
               ],
+            )
             ), // closes Column
           ), // closes Padding
         ), // closes Card
@@ -778,9 +718,9 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: color.withValues(alpha: 0.8),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Text(

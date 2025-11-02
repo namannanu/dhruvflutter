@@ -5,7 +5,7 @@ class SectionHeader extends StatelessWidget {
     super.key,
     required this.title,
     this.subtitle,
-    this.trailing,
+    this.trailing, required TextStyle style,
   });
 
   final String title;

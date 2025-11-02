@@ -11,24 +11,111 @@ import 'package:talent/features/shared/screens/messaging_screen.dart';
 import 'package:talent/features/shared/services/conversation_api_service.dart';
 import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 
-class WorkerApplicationsScreen extends StatelessWidget {
+class WorkerApplicationsScreen extends StatefulWidget {
   const WorkerApplicationsScreen({super.key});
 
   @override
+  State<WorkerApplicationsScreen> createState() =>
+      _WorkerApplicationsScreenState();
+}
+
+class _WorkerApplicationsScreenState extends State<WorkerApplicationsScreen> {
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Don't load immediately - wait for user to actually need the data
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeApplicationsLazily();
+    });
+  }
+
+  Future<void> _initializeApplicationsLazily() async {
+    if (_isInitialized) return;
+
+    final appState = context.read<AppState>();
+
+    // If we already have applications cached, use them immediately
+    if (appState.workerApplications.isNotEmpty) {
+      setState(() => _isInitialized = true);
+      return;
+    }
+
+    // For empty cache, show loading and fetch
+    setState(() => _isInitialized = false);
+    await _loadApplications();
+  }
+
+  Future<void> _loadApplications() async {
+    if (_isInitialized) return;
+
+    try {
+      final appState = context.read<AppState>();
+      final currentUser = appState.currentUser;
+
+      if (currentUser == null) {
+        print('❌ Cannot load applications: No current user');
+        setState(() => _isInitialized = true);
+        return;
+      }
+
+      print('🔍 Loading applications for worker: ${currentUser.id}');
+
+      // Use the optimized method that checks cache first
+      await appState.loadWorkerApplications(currentUser.id).timeout(
+        const Duration(seconds: 8), // Reduced timeout for faster failure
+        onTimeout: () {
+          throw Exception('Application loading timed out');
+        },
+      );
+
+      print('✅ Applications loaded: ${appState.workerApplications.length}');
+    } catch (error) {
+      print('❌ Failed to load applications: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load applications: ${error.toString()}'),
+            backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () {
+                setState(() => _isInitialized = false);
+                _loadApplications();
+              },
+            ),
+          ),
+        );
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isInitialized = true);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final applications = context.watch<AppState>().workerApplications;
+    final appState = context.watch<AppState>();
+    final applications = appState.workerApplications;
+
+    if (!_isInitialized && applications.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Loading your applications...'),
+          ],
+        ),
+      );
+    }
 
     return RefreshIndicator(
       onRefresh: () async {
-        final appState = context.read<AppState>();
-        // Load both applications and jobs so messaging can work
-        await Future.wait([
-          appState.refreshActiveRole(),
-          if (appState.currentUser != null) ...[
-            appState.loadWorkerJobs(appState.currentUser!.id),
-            appState.loadWorkerApplications(appState.currentUser!.id),
-          ],
-        ]);
+        await _loadApplications();
       },
       child: ListView(
         padding: const EdgeInsets.all(24),
@@ -36,17 +123,23 @@ class WorkerApplicationsScreen extends StatelessWidget {
           const SectionHeader(
             title: 'Applications',
             subtitle: 'Track status and employer responses',
+            style: TextStyle(fontSize: 10),
           ),
           const SizedBox(height: 16),
           if (applications.isEmpty)
-            const Card(
+            Card(
               child: Padding(
-                padding: EdgeInsets.all(24),
+                padding: const EdgeInsets.all(24),
                 child: Column(
                   children: [
-                    Icon(Icons.assignment_outlined, size: 48),
-                    SizedBox(height: 12),
-                    Text('You have not applied to any jobs yet.'),
+                    const Icon(Icons.assignment_outlined, size: 48),
+                    const SizedBox(height: 12),
+                    const Text('You have not applied to any jobs yet.'),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _loadApplications,
+                      child: const Text('Retry loading applications'),
+                    ),
                   ],
                 ),
               ),
@@ -98,28 +191,17 @@ class _ApplicationCard extends StatelessWidget {
             LayoutBuilder(
               builder: (context, constraints) {
                 final title = Text(
-                  'Application ${application.id.split('-').last}',
+                  'Application ',
                   style: theme.textTheme.titleMedium,
-                  maxLines: constraints.maxWidth >= 360 ? 1 : 2,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 );
 
-                if (constraints.maxWidth >= 360) {
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: title),
-                      const SizedBox(width: 12),
-                      statusChip,
-                    ],
-                  );
-                }
-
-                return Column(
+                return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    title,
-                    const SizedBox(height: 8),
+                    Expanded(child: title),
+                    const SizedBox(width: 12),
                     statusChip,
                   ],
                 );
@@ -216,6 +298,33 @@ class _ApplicationCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Business address
+              if (application.job!.businessAddress.isNotEmpty) ...[
+                Row(
+                  children: [
+                    const Icon(Icons.location_on_outlined, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        application.job!.businessAddress,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+
+              // Urgency display
+              Row(
+                children: [
+                  _buildUrgencyChip(application.job!.urgency),
                 ],
               ),
               const SizedBox(height: 8),
@@ -571,6 +680,50 @@ class _ApplicationCard extends StatelessWidget {
         );
       }
     }
+  }
+
+  Widget _buildUrgencyChip(String urgency) {
+    Color backgroundColor;
+    Color textColor;
+    IconData icon;
+
+    switch (urgency.toLowerCase()) {
+      case 'high':
+        backgroundColor = Colors.red.shade100;
+        textColor = Colors.red.shade800;
+        icon = Icons.priority_high;
+        break;
+      case 'medium':
+        backgroundColor = Colors.orange.shade100;
+        textColor = Colors.orange.shade800;
+        icon = Icons.schedule;
+        break;
+      case 'low':
+      default:
+        backgroundColor = Colors.green.shade100;
+        textColor = Colors.green.shade800;
+        icon = Icons.low_priority;
+        break;
+    }
+
+    return Chip(
+      avatar: Icon(
+        icon,
+        size: 14,
+        color: textColor,
+      ),
+      label: Text(
+        '${urgency.substring(0, 1).toUpperCase()}${urgency.substring(1)} priority',
+        style: TextStyle(
+          color: textColor,
+          fontWeight: FontWeight.w600,
+          fontSize: 12,
+        ),
+      ),
+      backgroundColor: backgroundColor,
+      side: BorderSide(color: textColor.withOpacity(0.3)),
+      visualDensity: VisualDensity.compact,
+    );
   }
 
   Color _statusColor(BuildContext context, ApplicationStatus status) {

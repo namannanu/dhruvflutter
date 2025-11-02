@@ -31,9 +31,6 @@ class _WorkerShellState extends State<WorkerShell> {
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
-    final profileName = appState.workerProfile?.firstName ??
-        appState.currentUser?.firstName ??
-        '';
 
     // Temporary implementation with fewer screens
     final pages = [
@@ -46,21 +43,23 @@ class _WorkerShellState extends State<WorkerShell> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'Worker Dashboard${profileName.isNotEmpty ? ' · $profileName' : ''}',
+        title: const Text(
+          'Worker Dashboard',
+          style: TextStyle(fontSize: 18),
         ),
         actions: [
           IconButton(
             tooltip: 'Messages',
-            icon: const Icon(Icons.message),
+            icon: const Icon(Icons.message, size: 20),
             onPressed: _openMessaging,
+
           ),
           Badge(
             label: appState.unreadNotificationCount > 0
                 ? Text(appState.unreadNotificationCount.toString())
                 : null,
             child: IconButton(
-              icon: const Icon(Icons.notifications_outlined),
+              icon: const Icon(Icons.notifications_outlined,size: 20),
               onPressed: () {
                 Navigator.push(
                   context,

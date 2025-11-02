@@ -1,11 +1,14 @@
 // ignore_for_file: directives_ordering, require_trailing_commas
 
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user.dart';
 import '../services/auth_service.dart';
 import '../services/api_auth_service.dart';
+import '../cache/cache_service.dart';
+import '../repositories/worker_repository.dart';
+import '../repositories/employer_repository.dart';
 
 class AuthProvider extends ChangeNotifier {
   AuthProvider({
@@ -18,6 +21,11 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
 
+  // Cache infrastructure (initialized lazily)
+  CacheService? _cache;
+  WorkerRepository? _workerRepo;
+  EmployerRepository? _employerRepo;
+
   User? get currentUser => authService.currentUser;
   bool get isAuthenticated => authService.isAuthenticated;
   bool get isLoading => _isLoading;
@@ -27,6 +35,17 @@ class AuthProvider extends ChangeNotifier {
     authService.authStateChanges.listen((_) {
       notifyListeners();
     });
+    _initializeCache();
+  }
+
+  Future<void> _initializeCache() async {
+    try {
+      _cache = await CacheService.open('auth_cache');
+      _workerRepo = WorkerRepository(_cache!);
+      _employerRepo = EmployerRepository(_cache!);
+    } catch (e) {
+      if (kDebugMode) print('Failed to initialize cache: $e');
+    }
   }
 
   Future<bool> login(String email, String password) async {
@@ -38,12 +57,38 @@ class AuthProvider extends ChangeNotifier {
       await authService.login(email: email, password: password);
       _isLoading = false;
       notifyListeners();
+
+      // Warm caches in the background
+      final user = authService.currentUser;
+      if (user != null && _workerRepo != null && _employerRepo != null) {
+        _warmCaches(user);
+      }
+
       return true;
     } catch (e) {
       _isLoading = false;
       _error = e.toString();
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Warm caches in the background without blocking UI
+  void _warmCaches(User user) {
+    if (user.type == UserType.worker) {
+      _workerRepo?.refreshJobs(user.id);
+      _workerRepo?.refreshApplications(user.id);
+      _workerRepo?.refreshProfile(user.id);
+      _workerRepo?.refreshAttendance(user.id);
+      _workerRepo?.refreshMetrics(user.id);
+      if (kDebugMode) print('🔥 Warming worker caches for ${user.email}');
+    } else {
+      _employerRepo?.refreshBusinesses();
+      _employerRepo?.refreshJobs(user.id);
+      _employerRepo?.refreshApplications(user.id);
+      _employerRepo?.refreshMetrics(user.id);
+      _employerRepo?.refreshProfile(user.id);
+      if (kDebugMode) print('🔥 Warming employer caches for ${user.email}');
     }
   }
 
@@ -101,11 +146,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   static Future<AuthProvider> create() async {
-    final dio = Dio(BaseOptions(
-      baseUrl: 'https://api.talentapp.com', // Replace with your API URL
-      connectTimeout: const Duration(seconds: 5),
-      receiveTimeout: const Duration(seconds: 10),
-    ));
+    final dio = Dio(BaseOptions());
 
     final prefs = await SharedPreferences.getInstance();
     final authService = ApiAuthService(dio: dio, preferences: prefs);

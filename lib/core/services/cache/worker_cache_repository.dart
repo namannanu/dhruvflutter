@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:talent/core/utils/performance_monitor.dart';
 
 import '../../models/models.dart';
 
@@ -13,7 +14,9 @@ class WorkerCacheRepository {
   static const _metricsKey = 'cache.worker.metrics';
 
   static Future<WorkerCacheRepository> create() async {
+    PerformanceMonitor.startTiming('SharedPreferences Init');
     final prefs = await SharedPreferences.getInstance();
+    PerformanceMonitor.endTiming('SharedPreferences Init');
     return WorkerCacheRepository._(prefs);
   }
 

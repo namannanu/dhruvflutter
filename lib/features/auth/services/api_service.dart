@@ -8,12 +8,15 @@ class ApiService {
       'https://dhruvbackend.vercel.app/api'; // API base URL
   final Dio _dio;
 
-  ApiService({required String baseUrl, required bool enableLogging}) : _dio = Dio() {
+  ApiService({required String baseUrl, required bool enableLogging})
+      : _dio = Dio() {
     _dio.options.baseUrl = baseUrl;
     _dio.options.connectTimeout =
-        const Duration(seconds: 15); // Increased from 5 seconds
+        const Duration(seconds: 30); // Increased for slow networks
     _dio.options.receiveTimeout =
-        const Duration(seconds: 15); // Increased from 3 seconds
+        const Duration(seconds: 60); // Increased for slow server responses
+    _dio.options.sendTimeout =
+        const Duration(seconds: 30); // Added send timeout
 
     // Add interceptors for logging, auth token, etc.
     if (kDebugMode) {
