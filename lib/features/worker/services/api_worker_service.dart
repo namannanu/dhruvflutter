@@ -1,5 +1,6 @@
 // ignore_for_file: unnecessary_type_check, avoid_print, unrelated_type_equality_checks
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -719,8 +720,12 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         headers: requestHeaders,
       );
       final json = decodeJson(response);
-      metricsJson =
-          _mapOrNull(json['metrics']) ?? _mapOrNull(json['data']) ?? json;
+      // Extract metrics from the correct path: data.metrics
+      final dataObj = _mapOrNull(json['data']);
+      metricsJson = _mapOrNull(dataObj?['metrics']) ??
+          _mapOrNull(json['metrics']) ??
+          dataObj ??
+          json;
       final metrics = _parseWorkerDashboardMetrics(metricsJson);
       await _cache?.writeMetrics(metrics);
       return metrics;
@@ -745,30 +750,58 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
   Future<WorkerDashboardMetrics> _computeWorkerMetricsFallback(
     String workerId,
   ) async {
-    final jobs = await fetchWorkerJobs(workerId);
-    final applications = await fetchWorkerApplications(workerId);
-    final attendance = await fetchWorkerAttendance(workerId);
-    final shifts = await fetchWorkerShifts(workerId);
+    // Use parallel requests and handle individual failures gracefully
+    final futures = await Future.wait([
+      fetchWorkerJobs(workerId).catchError((_) => <JobPosting>[]),
+      fetchWorkerApplications(workerId).catchError((_) => <Application>[]),
+      fetchWorkerAttendance(workerId).catchError((_) => <AttendanceRecord>[]),
+      fetchWorkerShifts(workerId).catchError((_) => <Shift>[]),
+    ]);
 
+    final jobs = futures[0] as List<JobPosting>;
+    final applications = futures[1] as List<Application>;
+    final attendance = futures[2] as List<AttendanceRecord>;
+    final shifts = futures[3] as List<Shift>;
+
+    // Calculate metrics with proper null safety
     final availableJobs =
         jobs.where((job) => job.status == JobStatus.active).length;
-    final activeApplications =
-        applications.where((app) => app.status == 'pending').length;
+
+    final activeApplications = applications
+        .where((app) => app.status == 'pending' || app.status == 'submitted')
+        .length;
+
+    final now = DateTime.now();
     final upcomingShifts =
-        shifts.where((shift) => shift.start.isAfter(DateTime.now())).length;
+        shifts.where((shift) => shift.start.isAfter(now)).length;
+
     final completedAttendance = attendance
         .where((record) => record.status == AttendanceStatus.completed)
         .toList();
+
     final completedHours = completedAttendance.fold<double>(
-      0,
+      0.0,
       (sum, record) => sum + record.totalHours,
     );
-    final now = DateTime.now();
+
+    // Calculate this week's earnings more accurately
+    final startOfWeek =
+        DateTime(now.year, now.month, now.day - now.weekday + 1);
     final earningsThisWeek = completedAttendance.where((record) {
       final start = record.scheduledStart;
-      final diff = now.difference(start).inDays;
-      return diff <= 7 && diff >= 0;
-    }).fold<double>(0, (sum, record) => sum + record.earnings);
+      return start.isAfter(startOfWeek) && start.isBefore(now);
+    }).fold<double>(0.0, (sum, record) => sum + record.earnings);
+
+    // Provide realistic defaults for free tier
+    const defaultFreeApplicationsLimit = 5;
+    final applicationsThisMonth = applications.where((app) {
+      final createdAt = app.submittedAt;
+      final startOfMonth = DateTime(now.year, now.month, 1);
+      return createdAt.isAfter(startOfMonth);
+    }).length;
+
+    final freeApplicationsRemaining =
+        math.max(0, defaultFreeApplicationsLimit - applicationsThisMonth);
 
     return WorkerDashboardMetrics(
       availableJobs: availableJobs,
@@ -776,8 +809,8 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       upcomingShifts: upcomingShifts,
       completedHours: completedHours,
       earningsThisWeek: earningsThisWeek,
-      freeApplicationsRemaining: 2,
-      isPremium: false,
+      freeApplicationsRemaining: freeApplicationsRemaining,
+      isPremium: false, // Default to false for fallback
     );
   }
 
@@ -976,6 +1009,9 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     if (value is Map<String, dynamic>) {
       return value;
     }
+    if (value is Map) {
+      return value.map((key, val) => MapEntry(key.toString(), val));
+    }
     return null;
   }
 
@@ -1023,7 +1059,20 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
 
   String? _string(dynamic value) {
     if (value == null) return null;
-    if (value is String) return value;
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return null;
+      }
+      final normalized = trimmed.toLowerCase();
+      if (normalized == 'null' ||
+          normalized == 'undefined' ||
+          normalized == 'nan' ||
+          normalized == 'n/a') {
+        return null;
+      }
+      return trimmed;
+    }
     if (value is num) return value.toString();
     if (value is bool) return value ? 'true' : 'false';
     return null;
@@ -1039,29 +1088,39 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         rawLocation.forEach((key, val) {
           map[key.toString()] = val;
         });
+
+        // Priority 1: Check for line1 (new format)
+        final line1 = _string(map['line1']);
+        if (line1 != null && line1.trim().isNotEmpty) {
+          return line1.trim();
+        }
+
+        // Priority 2: Check for formattedAddress (legacy format)
         final formatted = _string(map['formattedAddress']);
         if (formatted != null && formatted.trim().isNotEmpty) {
           return formatted.trim();
         }
+
         final label = _string(map['label']) ?? _string(map['name']);
         if (label != null && label.trim().isNotEmpty) {
           return label.trim();
         }
 
-        final addressObj = map['address'] is Map ? Map<String, dynamic>.from(map['address'] as Map) : null;
-        final addressLine1 =
-            _string(addressObj?['line1']) ?? _string(addressObj?['street']) ?? _string(addressObj?['address1']);
-        final addressLine2 =
-            _string(addressObj?['line2']) ?? _string(addressObj?['street2']) ?? _string(addressObj?['address2']);
+        final addressObj = map['address'] is Map
+            ? Map<String, dynamic>.from(map['address'] as Map)
+            : null;
+        final addressLine2 = _string(addressObj?['line2']) ??
+            _string(addressObj?['street2']) ??
+            _string(addressObj?['address2']);
 
         final parts = <String>[];
-        final line1 =
-            _string(map['line1']) ?? _string(map['street']) ?? _string(map['address']) ?? addressLine1;
         final line2 = _string(map['line2']);
         final city = _string(map['city']) ?? _string(addressObj?['city']);
         final state = _string(map['state']) ?? _string(addressObj?['state']);
-        final postalCode =
-            _string(map['postalCode']) ?? _string(map['zip']) ?? _string(addressObj?['postalCode']) ?? _string(addressObj?['zip']);
+        final postalCode = _string(map['postalCode']) ??
+            _string(map['zip']) ??
+            _string(addressObj?['postalCode']) ??
+            _string(addressObj?['zip']);
 
         if (line1 != null && line1.trim().isNotEmpty) {
           parts.add(line1.trim());
@@ -1092,12 +1151,21 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
           parts.add(postalCode.trim());
         }
 
-        final joined = parts.where((segment) => segment.trim().isNotEmpty).join(', ');
+        final joined =
+            parts.where((segment) => segment.trim().isNotEmpty).join(', ');
         if (joined.trim().isNotEmpty) {
           return joined.trim();
         }
       }
       return null;
+    }
+
+    double? parseCoordinate(dynamic value) {
+      final str = _string(value);
+      if (str == null) {
+        return null;
+      }
+      return double.tryParse(str);
     }
 
     try {
@@ -1138,9 +1206,12 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
 
       final hourlyRate =
           double.tryParse(_string(json['hourlyRate']) ?? '') ?? 0;
-      final overtimeRate =
-          double.tryParse(_string(json['overtimeRate']) ?? '') ??
-              (hourlyRate * 1.5);
+      // Parse overtime rate and convert to JobOvertime object
+      final overtimeRate = double.tryParse(_string(json['overtimeRate']) ?? '') ?? (hourlyRate * 1.5);
+      final overtime = JobOvertime(
+        allowed: json['overtimeAllowed'] == true || json['overtimeRate'] != null,
+        rateMultiplier: overtimeRate / (hourlyRate > 0 ? hourlyRate : 1),
+      );
       final urgency = _string(json['urgency']) ?? 'medium';
       final tags = json['tags'] is List
           ? (json['tags'] as List).map((t) => t.toString()).toList()
@@ -1162,7 +1233,22 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
       final hasApplied = _string(json['hasApplied'])?.toLowerCase() == 'true';
       final premiumRequired =
           _string(json['premiumRequired'])?.toLowerCase() == 'true';
-      final locationSummary = _string(json['locationSummary']);
+
+      // Parse business-related fields with safe handling
+      final businessName = _string(json['businessName']) ??
+          _string(json['businessDetails']?['name']) ??
+          '';
+
+      final businessLocationInfo = _mapOrNull(json['businessLocationInfo']);
+      final businessLocationInfoAddress =
+          _string(businessLocationInfo?['address']);
+      final businessLocationInfoCoordinates =
+          _mapOrNull(businessLocationInfo?['coordinates']);
+      final businessLocationInfoRadius =
+          parseCoordinate(businessLocationInfo?['allowedRadius']);
+
+      final locationSummary =
+          _string(json['locationSummary']) ?? businessLocationInfoAddress ?? '';
 
       // Safe parsing of applicantsCount with detailed error handling
       int applicantsCount = 0;
@@ -1173,24 +1259,76 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         applicantsCount = 0;
       }
 
-      // Parse business-related fields with safe handling
-      final businessName = _string(json['businessName']) ??
-          _string(json['businessDetails']?['name']) ??
+      JobLocation? businessInfoLocation;
+      if (businessLocationInfoAddress != null ||
+          (businessLocationInfoCoordinates != null &&
+              (businessLocationInfoCoordinates['latitude'] != null ||
+                  businessLocationInfoCoordinates['longitude'] != null ||
+                  businessLocationInfoCoordinates['lat'] != null ||
+                  businessLocationInfoCoordinates['lng'] != null))) {
+        businessInfoLocation = JobLocation(
+          label: _string(businessLocationInfo?['businessName']) ??
+              businessLocationInfoAddress,
+          location: businessLocationInfoAddress,
+          line1: businessLocationInfoAddress,
+          latitude: parseCoordinate(
+              businessLocationInfoCoordinates?['latitude'] ??
+                  businessLocationInfoCoordinates?['lat']),
+          longitude: parseCoordinate(
+              businessLocationInfoCoordinates?['longitude'] ??
+                  businessLocationInfoCoordinates?['lng']),
+          allowedRadiusMeters: businessLocationInfoRadius ??
+              parseCoordinate(businessLocationInfo?['radiusMeters']) ??
+              parseCoordinate(businessLocationInfo?['radius']),
+        );
+      }
+
+      final rawBusinessAddress = _string(json['businessAddress']);
+
+      // Debug business address parsing
+      print('🏢 DEBUG: Parsing business address for job ${json['_id']}');
+      print('   json["businessAddress"]: "$rawBusinessAddress"');
+      print(
+          '   location address: "${deriveLocationAddress(json['location'])}"');
+      print(
+          '   businessDetails location: "${deriveLocationAddress(json['businessDetails']?['location'])}"');
+      print(
+          '   businessDetails address: "${_string(json['businessDetails']?['address'])}"');
+      print('   businessLocationInfo address: "$businessLocationInfoAddress"');
+
+      final businessAddress = rawBusinessAddress ??
+          deriveLocationAddress(json['location']) ??
+          deriveLocationAddress(json['businessDetails']?['location']) ??
+          businessLocationInfoAddress ??
+          _string(json['businessDetails']?['address']) ??
           '';
-      final businessAddress =
-          _string(json['businessAddress']) ??
-              deriveLocationAddress(json['location']) ??
-              deriveLocationAddress(json['businessDetails']?['location']) ??
-              _string(json['businessDetails']?['address']) ??
-              '';
+
+      print('   ✅ Final businessAddress: "$businessAddress"');
+      print(
+          '   📍 Address source: ${_string(json['businessAddress']) != null ? "direct businessAddress field" : deriveLocationAddress(json['location']) != null ? "job location" : deriveLocationAddress(json['businessDetails']?['location']) != null ? "business location" : "fallback/empty"}');
+
+      final jobLocation = JobLocation.fromDynamic(json['location']);
+      final businessLocation =
+          JobLocation.fromDynamic(json['businessDetails']?['location']);
+      final resolvedLocation =
+          jobLocation ?? businessLocation ?? businessInfoLocation;
+      final normalizedBusinessAddress = businessAddress.isNotEmpty
+          ? businessAddress
+          : (resolvedLocation?.fullAddress ??
+              resolvedLocation?.shortAddress ??
+              businessLocationInfoAddress ??
+              '');
+
+      if (resolvedLocation != null) {
+        print(
+            '   🧭 Resolved location coordinates: lat=${resolvedLocation.latitude}, lng=${resolvedLocation.longitude}');
+      }
 
       final businessLogoUrl = _string(json['businessLogoUrl']) ??
           _string(json['businessDetails']?['logoUrl']);
       final businessLogoOriginalUrl =
           _string(json['businessLogoOriginalUrl']) ??
               _string(json['businessDetails']?['logo']?['original']?['url']);
-      final businessLogoSquareUrl = _string(json['businessLogoSquareUrl']) ??
-          _string(json['businessDetails']?['logo']?['square']?['url']);
 
       // Parse publish status fields
       final isPublished = json['isPublished'] as bool? ??
@@ -1208,7 +1346,7 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         scheduleStart: scheduleStart,
         scheduleEnd: scheduleEnd,
         recurrence: 'one-time',
-        overtimeRate: overtimeRate,
+        overtime: overtime,
         urgency: urgency,
         tags: tags,
         workDays: workDays,
@@ -1221,12 +1359,12 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
         locationSummary: locationSummary,
         applicantsCount: applicantsCount,
         businessName: businessName,
-        businessLogoUrl: businessLogoUrl,
-        businessLogoOriginalUrl: businessLogoOriginalUrl,
-        businessLogoSquareUrl: businessLogoSquareUrl,
+        businessLogoSmall: businessLogoUrl,
+        businessLogoMedium: businessLogoOriginalUrl,
         isPublished: isPublished,
         publishStatus: publishStatus,
-        businessAddress: businessAddress,
+        location: resolvedLocation,
+        businessAddress: normalizedBusinessAddress, createdByName: '',
       );
     } catch (e, stackTrace) {
       print('ERROR: Failed to parse job posting: $e');
@@ -1814,6 +1952,32 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     Map<String, dynamic>? json,
   ) {
     final metrics = _mapOrNull(json) ?? const <String, dynamic>{};
+
+    // Helper functions for type conversion
+    int asInt(dynamic value) {
+      if (value is int) return value;
+      if (value is double) return value.toInt();
+      if (value is String) return int.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    double asDouble(dynamic value) {
+      if (value is double) return value;
+      if (value is int) return value.toDouble();
+      if (value is String) return double.tryParse(value) ?? 0.0;
+      return 0.0;
+    }
+
+    bool asBool(dynamic value) {
+      if (value is bool) return value;
+      if (value is String) {
+        final lower = value.toLowerCase();
+        return lower == 'true' || lower == '1' || lower == 'yes';
+      }
+      return false;
+    }
+
+    // Extract values directly from the metrics object (primary) with fallbacks
     final profile = _mapOrNull(metrics['profile']);
     final counts = _mapOrNull(metrics['counts']);
     final applications = _mapOrNull(metrics['applications']);
@@ -1821,71 +1985,39 @@ class ApiWorkerService extends BaseApiService implements WorkerService {
     final freeTier = _mapOrNull(metrics['freeTier']);
     final premium = _mapOrNull(metrics['premium']);
 
-    int? asInt(dynamic value) {
-      final stringValue = _string(value);
-      if (stringValue == null || stringValue.isEmpty) return null;
-      return int.tryParse(stringValue);
-    }
+    // Get core metrics - prefer top-level metrics fields first
+    final availableJobs = asInt(metrics['availableJobs']) != 0
+        ? asInt(metrics['availableJobs'])
+        : asInt(counts?['availableJobs']);
 
-    double? asDouble(dynamic value) {
-      final stringValue = _string(value);
-      if (stringValue == null || stringValue.isEmpty) return null;
-      return double.tryParse(stringValue);
-    }
+    final activeApplications = asInt(metrics['activeApplications']) != 0
+        ? asInt(metrics['activeApplications'])
+        : (asInt(byStatus?['pending']) != 0
+            ? asInt(byStatus?['pending'])
+            : asInt(applications?['total']));
 
-    bool? asBool(dynamic value) {
-      if (value is bool) return value;
-      final stringValue = _string(value)?.toLowerCase();
-      if (stringValue == null) return null;
-      if (stringValue == 'true' || stringValue == '1' || stringValue == 'yes') {
-        return true;
-      }
-      if (stringValue == 'false' || stringValue == '0' || stringValue == 'no') {
-        return false;
-      }
-      return null;
-    }
+    final upcomingShifts = asInt(metrics['upcomingShifts']) != 0
+        ? asInt(metrics['upcomingShifts'])
+        : asInt(counts?['weeklyShifts']);
 
-    int? deriveRemaining(int? limitValue, int? usedValue) {
-      if (limitValue == null || usedValue == null) return null;
-      final remaining = limitValue - usedValue;
-      if (remaining < 0) return 0;
-      if (remaining > limitValue) return limitValue;
-      return remaining;
-    }
+    final completedHours = asDouble(metrics['completedHours']) != 0.0
+        ? asDouble(metrics['completedHours'])
+        : asDouble(profile?['totalEarnings']); // Use profile data as fallback
 
-    final availableJobs = asInt(metrics['availableJobs']) ??
-        asInt(counts?['availableJobs']) ??
-        asInt(counts?['totalJobs']) ??
-        0;
-    final pendingApplications =
-        asInt(byStatus?['pending']) ?? asInt(applications?['pending']);
-    final activeApplications = asInt(metrics['activeApplications']) ??
-        pendingApplications ??
-        asInt(applications?['total']) ??
-        0;
-    final upcomingShifts = asInt(metrics['upcomingShifts']) ??
-        asInt(counts?['upcomingShifts']) ??
-        asInt(counts?['weeklyShifts']) ??
-        asInt(counts?['monthlyShifts']) ??
-        0;
-    final completedHours = asDouble(metrics['completedHours']) ??
-        asDouble(profile?['completedHours']) ??
-        asInt(counts?['totalAttendance'])?.toDouble() ??
-        0;
-    final earningsThisWeek = asDouble(metrics['earningsThisWeek']) ??
-        asDouble(profile?['weeklyEarnings']) ??
-        0;
-    final limit = asInt(freeTier?['jobApplicationsLimit']);
-    final used = asInt(freeTier?['jobApplicationsUsed']);
-    final derivedRemaining = deriveRemaining(limit, used);
+    final earningsThisWeek = asDouble(metrics['earningsThisWeek']) != 0.0
+        ? asDouble(metrics['earningsThisWeek'])
+        : asDouble(profile?['weeklyEarnings']);
+
+    // Free applications remaining - prefer top-level, then freeTier data
     final freeApplicationsRemaining =
-        asInt(metrics['freeApplicationsRemaining']) ??
-            asInt(freeTier?['remainingApplications']) ??
-            derivedRemaining ??
-            2;
+        asInt(metrics['freeApplicationsRemaining']) != 0
+            ? asInt(metrics['freeApplicationsRemaining'])
+            : (asInt(freeTier?['remainingApplications']) != 0
+                ? asInt(freeTier?['remainingApplications'])
+                : math.max(0, 5 - asInt(freeTier?['jobApplicationsUsed'])));
+
     final isPremium =
-        asBool(metrics['isPremium']) ?? asBool(premium?['isActive']) ?? false;
+        asBool(metrics['isPremium']) || asBool(premium?['isActive']);
 
     return WorkerDashboardMetrics(
       availableJobs: availableJobs,

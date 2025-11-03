@@ -12,10 +12,10 @@ abstract class JobService {
     String urgency = 'medium',
     bool verificationRequired = false,
     Map<String, dynamic>? location,
-    bool hasOvertime = false,
-    double? overtimeRate,
+    JobOvertime? overtime,
     String recurrence = 'one-time',
     List<String>? workDays,
+    bool autoPublish = true,
   });
 
   Future<void> processJobPostingPayment({

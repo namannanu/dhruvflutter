@@ -1,8 +1,13 @@
 import 'dart:convert';
+
+import 'package:talent/core/models/analytics.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/services/base/base_api_service.dart';
 import 'package:talent/core/services/locator/service_locator.dart';
+import 'package:talent/features/employer/services/attendance_api_service.dart';
 import 'package:talent/features/employer/services/employer_service.dart';
+
+// ignore_for_file: avoid_print
 
 class ApiEmployerService extends BaseApiService implements EmployerService {
   ApiEmployerService({
@@ -18,6 +23,8 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
   String? get _currentUserBusinessId =>
       ServiceLocator.instance.currentUserBusinessId;
 
+  AttendanceApiService get _attendanceApi => ServiceLocator.instance.attendance;
+
   String? _resolveBusinessId(String? businessId) {
     final candidate = (businessId ?? _currentUserBusinessId)?.trim();
     if (candidate == null || candidate.isEmpty) {
@@ -26,137 +33,17 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     return candidate;
   }
 
-  @override
-  Future<EmployerProfile> fetchEmployerProfile(
-    String employerId, {
-    String? businessId,
-  }) async {
-    try {
-      final resolvedBusinessId = _resolveBusinessId(businessId);
-      final requestHeaders = headers(
-        authToken: _authToken,
-        businessId: resolvedBusinessId,
-      );
-
-      final uri = resolvedBusinessId != null
-          ? resolveWithQuery(
-              'api/employers/$employerId',
-              query: {'businessId': resolvedBusinessId},
-            )
-          : resolve('api/employers/$employerId');
-
-      final response = await client.get(
-        uri,
-        headers: requestHeaders,
-      );
-      final json = decodeJson(response);
-      final employerJson = _mapOrNull(json['employer']) ?? json;
-      return _parseEmployerProfile(employerJson);
-    } on ApiWorkConnectException catch (error) {
-      if (error.statusCode == 404 || error.statusCode == 403) {
-        final resolvedBusinessId = _resolveBusinessId(businessId);
-        final requestHeaders = headers(
-          authToken: _authToken,
-          businessId: resolvedBusinessId,
-        );
-        final response = await client.get(
-          resolve('api/employers/me'),
-          headers: requestHeaders,
-        );
-        final fallback = decodeJson(response);
-        final employerJson = _mapOrNull(fallback['employer']) ?? fallback;
-        return _parseEmployerProfile(employerJson);
-      }
-      rethrow;
-    }
-  }
-
-  @override
-  Future<EmployerDashboardMetrics> fetchEmployerDashboardMetrics(
-    String employerId, {
-    String? businessId,
-  }) async {
-    final resolvedBusinessId = _resolveBusinessId(businessId);
-    final requestHeaders = headers(
-      authToken: _authToken,
-      businessId: resolvedBusinessId,
-    );
-
-    final uri = resolvedBusinessId != null
-        ? resolveWithQuery(
-            'api/employers/$employerId/dashboard',
-            query: {'businessId': resolvedBusinessId},
-          )
-        : resolve('api/employers/$employerId/dashboard');
-
-    final response = await client.get(
-      uri,
-      headers: requestHeaders,
-    );
-
-    final json = decodeJson(response);
-    final metrics =
-        _mapOrNull(json['metrics']) ?? _mapOrNull(json['dashboard']) ?? json;
-
-    return _parseEmployerMetrics(metrics);
-  }
-
-  @override
-  Future<List<JobPosting>> fetchEmployerJobs(
-    String employerId, {
-    String? businessId,
-  }) async {
-    final trimmedBusinessId = businessId?.trim();
-    final resolvedBusinessId =
-        (trimmedBusinessId != null && trimmedBusinessId.isNotEmpty)
-            ? trimmedBusinessId
-            : null;
-
-    final query = <String, dynamic>{'employerId': employerId};
-    if (resolvedBusinessId != null) {
-      query['businessId'] = resolvedBusinessId;
-    }
-
-    final requestHeaders = headers(
-      authToken: _authToken,
-      businessId: resolvedBusinessId,
-    );
-
-    final response = await client.get(
-      resolveWithQuery(
-        '/jobs',
-        query: query,
-      ),
-      headers: requestHeaders,
-    );
-    final data = decodeJsonList(response);
-    return data.map(_parseJobPosting).toList();
-  }
-
-  @override
-  Future<List<BusinessLocation>> fetchBusinessLocations(String ownerId) async {
-    final response = await client.get(
-      resolveWithQuery(
-        '/businesses',
-        query: {'ownerId': ownerId},
-      ),
-      headers: headers(authToken: _authToken),
-    );
-    final data = decodeJsonList(response);
-    return data.map(_parseBusinessLocation).toList();
-  }
-
-  // Helper methods for parsing responses
-  Map<String, dynamic>? _mapOrNull(dynamic value) {
-    if (value is Map<String, dynamic>) {
-      return value;
-    }
-    if (value is Map) {
-      return Map<String, dynamic>.from(
-        value.map((key, val) => MapEntry(key.toString(), val)),
-      );
-    }
+  Map<String, dynamic>? _mapOrNull(dynamic input) {
+    if (input == null) return null;
+    if (input is Map<String, dynamic>) return input;
+    if (input is Map) return Map<String, dynamic>.from(input);
     return null;
+  }
+
+  List<dynamic> _listOrEmpty(dynamic input) {
+    if (input == null) return const [];
+    if (input is List) return input;
+    return const [];
   }
 
   String? _string(dynamic value) {
@@ -167,17 +54,15 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     return null;
   }
 
-  List<String>? _stringList(dynamic value) {
-    if (value is List) {
-      return value.map((item) => item.toString()).toList();
-    }
-    return null;
-  }
-
   String? _composeName(Map<String, dynamic>? data) {
     if (data == null) return null;
+
+    final fullName = _string(data['name']) ?? _string(data['fullName']);
+    if (fullName != null && fullName.isNotEmpty) return fullName;
+
     final first = _string(data['firstName']) ?? _string(data['givenName']);
     final last = _string(data['lastName']) ?? _string(data['familyName']);
+
     final parts = <String>[];
     if (first != null && first.isNotEmpty) {
       parts.add(first);
@@ -185,14 +70,12 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
     if (last != null && last.isNotEmpty) {
       parts.add(last);
     }
+
     final combined = parts.join(' ').trim();
     if (combined.isNotEmpty) {
       return combined;
     }
-    final fallback = _string(data['name']);
-    if (fallback != null && fallback.isNotEmpty) {
-      return fallback;
-    }
+
     return null;
   }
 
@@ -223,106 +106,127 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
   }
 
   JobPosting _parseJobPosting(dynamic value) {
-    final json = _mapOrNull(value) ?? const <String, dynamic>{};
-    final employerDetails =
-        _mapOrNull(json['employerDetails']) ?? _mapOrNull(json['employer']);
-    final businessDetails =
-        _mapOrNull(json['businessDetails']) ?? _mapOrNull(json['business']);
-    final createdByDetails = _mapOrNull(json['createdByDetails']) ??
-        (json['createdBy'] is Map ? _mapOrNull(json['createdBy']) : null);
+    final json = _mapOrNull(value) ?? <String, dynamic>{};
 
+    // Extract core fields
     final id = _string(json['id']) ?? _string(json['_id']) ?? '';
     final title = _string(json['title']) ?? 'Job';
     final description = _string(json['description']) ?? '';
+    final hourlyRate = double.tryParse(_string(json['hourlyRate']) ?? '') ?? 0;
+    final status = _parseJobStatus(_string(json['status']));
+    final urgency = _string(json['urgency'])?.toLowerCase() ?? 'medium';
+
+    // Parse dates
+    final scheduleStart =
+        DateTime.tryParse(_string(json['scheduleStart']) ?? '') ??
+            DateTime.now();
+    final scheduleEnd = DateTime.tryParse(_string(json['scheduleEnd']) ?? '') ??
+        scheduleStart.add(const Duration(hours: 4));
+    final postedAt = DateTime.tryParse(
+            _string(json['postedAt']) ?? _string(json['createdAt']) ?? '') ??
+        DateTime.now();
+
+    // Parse entity details
+    final employerMap = _mapOrNull(json['employer'] ?? json['employerDetails']);
+    final businessMap = _mapOrNull(json['business'] ?? json['businessDetails']);
+    final createdByMap =
+        _mapOrNull(json['createdBy'] ?? json['createdByDetails']);
 
     final employerId = _string(json['employerId']) ??
-        _string(employerDetails?['_id']) ??
-        _string(employerDetails?['id']) ??
-        _string(json['employer']) ??
+        _string(employerMap?['id']) ??
+        _string(employerMap?['_id']) ??
         '';
-    final employerEmail =
-        _string(employerDetails?['email']) ?? _string(json['employerEmail']);
-    final employerName = _composeName(employerDetails);
 
     final businessId = _string(json['businessId']) ??
-        _string(businessDetails?['_id']) ??
-        _string(businessDetails?['id']) ??
-        _string(json['business']) ??
-        '';
-    final businessName = _string(json['businessName']) ??
-        _string(businessDetails?['businessName']) ??
-        _string(businessDetails?['name']) ??
+        _string(businessMap?['id']) ??
+        _string(businessMap?['_id']) ??
         '';
 
-    final createdById = _string(json['createdById']) ??
-        _string(createdByDetails?['_id']) ??
-        _string(createdByDetails?['id']);
-    final createdByEmail =
-        _string(createdByDetails?['email']) ?? _string(json['createdByEmail']);
-    final createdByName = _composeName(createdByDetails);
-    final createdByTag = _string(json['createdByTag']);
+    // Parse arrays and lists
+    final tags = _listOrEmpty(json['tags']).map((t) => t.toString()).toList();
 
-    final hourlyRate = double.tryParse(_string(json['hourlyRate']) ?? '') ?? 0;
-    final overtimeRate = double.tryParse(_string(json['overtimeRate']) ?? '') ??
-        (hourlyRate * 1.5);
-    final urgency = _string(json['urgency']) ?? 'medium';
-    final tags = _stringList(json['tags']) ?? <String>[];
-    final workDays = _stringList(json['workDays']) ?? <String>[];
-    final isVerificationRequired =
-        _string(json['verificationRequired'])?.toLowerCase() == 'true' ||
-            json['verificationRequired'] == true;
-    final scheduleStart = DateTime.tryParse(_string(json['startDate']) ??
-            _string(json['scheduleStart']) ??
-            '') ??
-        DateTime.now();
-    final scheduleEnd = DateTime.tryParse(
-            _string(json['endDate']) ?? _string(json['scheduleEnd']) ?? '') ??
-        scheduleStart.add(const Duration(hours: 4));
-    final status = _parseJobStatus(_string(json['status']));
-    final postedAt = DateTime.tryParse(
-            _string(json['createdAt']) ?? _string(json['postedAt']) ?? '') ??
-        DateTime.now();
+    final workDays =
+        _listOrEmpty(json['workDays']).map((d) => d.toString()).toList();
+
+    // Parse entity details
+    final businessName =
+        _string(businessMap?['name']) ?? _string(json['businessName']) ?? '';
+
+    final businessAddress = _string(businessMap?['address']) ??
+        _string(businessMap?['formattedAddress']) ??
+        _string(json['businessAddress']) ??
+        '';
+
+    // Parse optional entity fields
+    final employerEmail =
+        _string(employerMap?['email']) ?? _string(json['employerEmail']) ?? '';
+
+    final employerName =
+        _composeName(employerMap) ?? _string(json['employerName']) ?? '';
+
+    // Parse flags and counts
+    final isVerificationRequired = json['verificationRequired'] == true ||
+        json['isVerificationRequired'] == true;
+    final hasApplied = json['hasApplied'] == true;
+    final premiumRequired = json['premiumRequired'] == true;
     final distanceMiles =
         double.tryParse(_string(json['distanceMiles']) ?? '') ?? 0;
-    final hasApplied = _string(json['hasApplied'])?.toLowerCase() == 'true' ||
-        json['hasApplied'] == true;
-    final premiumRequired =
-        _string(json['premiumRequired'])?.toLowerCase() == 'true' ||
-            json['premiumRequired'] == true;
     final locationSummary = _string(json['locationSummary']);
     final applicantsCount =
         int.tryParse(_string(json['applicantsCount']) ?? '') ?? 0;
 
+    // Get media URLs
+    final businessLogoSmall = _string(json['businessLogoSmall']) ??
+        _string(businessMap?['logoSmall']);
+    final businessLogoMedium = _string(json['businessLogoMedium']) ??
+        _string(businessMap?['logoMedium']);
+
+    // Parse created by info
+    final createdById =
+        _string(createdByMap?['id']) ?? _string(createdByMap?['_id']) ?? '';
+    final createdByEmail = _string(createdByMap?['email']) ?? '';
+    final createdByName = _composeName(createdByMap) ?? '';
+    final createdByTag = _string(createdByMap?['tag']) ?? '';
+
+    // Parse overtime settings
+    final overtimeRate = double.tryParse(_string(json['overtimeRate']) ?? '') ??
+        (hourlyRate * 1.5);
+    final overtime = JobOvertime(
+        allowed: overtimeRate > hourlyRate,
+        rateMultiplier: overtimeRate / hourlyRate);
+
     return JobPosting(
-      id: id.isEmpty ? title : id,
-      title: title,
-      description: description,
-      employerId: employerId,
-      businessId: businessId,
-      hourlyRate: hourlyRate,
-      scheduleStart: scheduleStart,
-      scheduleEnd: scheduleEnd,
-      recurrence: 'one-time',
-      overtimeRate: overtimeRate,
-      urgency: urgency,
-      tags: tags,
-      workDays: workDays,
-      isVerificationRequired: isVerificationRequired,
-      status: status,
-      postedAt: postedAt,
-      distanceMiles: distanceMiles,
-      hasApplied: hasApplied,
-      premiumRequired: premiumRequired,
-      locationSummary: locationSummary,
-      applicantsCount: applicantsCount,
-      businessName: businessName,
-      employerEmail: employerEmail,
-      employerName: employerName,
-      createdById: createdById,
-      createdByTag: createdByTag,
-      createdByEmail: createdByEmail,
-      createdByName: createdByName, businessAddress: '',
-    );
+        id: id.isEmpty ? title : id,
+        title: title,
+        description: description,
+        employerId: employerId,
+        businessId: businessId,
+        hourlyRate: hourlyRate,
+        scheduleStart: scheduleStart,
+        scheduleEnd: scheduleEnd,
+        recurrence: 'one-time',
+        overtime: overtime,
+        urgency: urgency,
+        tags: tags,
+        workDays: workDays,
+        isVerificationRequired: isVerificationRequired,
+        status: status,
+        postedAt: postedAt,
+        distanceMiles: distanceMiles,
+        hasApplied: hasApplied,
+        premiumRequired: premiumRequired,
+        locationSummary: locationSummary,
+        applicantsCount: applicantsCount,
+        businessName: businessName,
+        businessAddress: businessAddress,
+        employerEmail: employerEmail,
+        employerName: employerName,
+        businessLogoSmall: businessLogoSmall,
+        businessLogoMedium: businessLogoMedium,
+        createdById: createdById,
+        createdByEmail: createdByEmail,
+        createdByName: createdByName,
+        createdByTag: createdByTag);
   }
 
   JobStatus _parseJobStatus(String? value) {
@@ -944,6 +848,184 @@ class ApiEmployerService extends BaseApiService implements EmployerService {
         .map((entry) =>
             JobPaymentRecord.fromJson(Map<String, dynamic>.from(entry)))
         .toList();
+  }
+
+  @override
+  Future<EmployerProfile> fetchEmployerProfile(
+    String employerId, {
+    String? businessId,
+  }) async {
+    final resolvedBusinessId = _resolveBusinessId(businessId);
+    final uri = resolveWithQuery(
+      'api/employers/$employerId',
+      query: resolvedBusinessId != null
+          ? {'businessId': resolvedBusinessId}
+          : null,
+    );
+
+    final response = await client.get(
+      uri,
+      headers: headers(authToken: _authToken),
+    );
+
+    if (response.statusCode != 200) {
+      throw ApiWorkConnectException(
+        response.statusCode,
+        'Failed to fetch employer profile: ${response.body}',
+      );
+    }
+
+    final responseData = decodeJson(response);
+    final profileData = _mapOrNull(responseData['data']) ?? responseData;
+    return _parseEmployerProfile(profileData);
+  }
+
+  @override
+  Future<EmployerDashboardMetrics> fetchEmployerDashboardMetrics(
+    String employerId, {
+    String? businessId,
+  }) async {
+    final resolvedBusinessId = _resolveBusinessId(businessId);
+    final uri = resolveWithQuery(
+      'api/employers/$employerId/dashboard',
+      query: resolvedBusinessId != null
+          ? {'businessId': resolvedBusinessId}
+          : null,
+    );
+
+    final response = await client.get(
+      uri,
+      headers: headers(authToken: _authToken),
+    );
+
+    if (response.statusCode != 200) {
+      throw ApiWorkConnectException(
+        response.statusCode,
+        'Failed to fetch employer metrics: ${response.body}',
+      );
+    }
+
+    final responseData = decodeJson(response);
+    final metricsData = _mapOrNull(responseData['data']) ?? responseData;
+    return _parseEmployerMetrics(metricsData);
+  }
+
+  @override
+  Future<List<JobPosting>> fetchEmployerJobs(
+    String employerId, {
+    String? businessId,
+  }) async {
+    final resolvedBusinessId = _resolveBusinessId(businessId);
+    final uri = resolveWithQuery(
+      'api/employers/$employerId/jobs',
+      query: resolvedBusinessId != null
+          ? {'businessId': resolvedBusinessId}
+          : null,
+    );
+
+    final response = await client.get(
+      uri,
+      headers: headers(authToken: _authToken),
+    );
+
+    if (response.statusCode != 200) {
+      throw ApiWorkConnectException(
+        response.statusCode,
+        'Failed to fetch employer jobs: ${response.body}',
+      );
+    }
+
+    final responseData = decodeJson(response);
+    final List<dynamic> jobsData;
+    if (responseData['data'] is List) {
+      jobsData = responseData['data'] as List<dynamic>;
+    } else if (responseData['jobs'] is List) {
+      jobsData = responseData['jobs'] as List<dynamic>;
+    } else {
+      jobsData = const [];
+    }
+
+    return jobsData.map((json) => _parseJobPosting(json)).toList();
+  }
+
+  @override
+  Future<List<BusinessLocation>> fetchBusinessLocations(String ownerId) async {
+    final uri = resolve('api/employers/$ownerId/businesses');
+
+    final response = await client.get(
+      uri,
+      headers: headers(authToken: _authToken),
+    );
+
+    if (response.statusCode != 200) {
+      throw ApiWorkConnectException(
+        response.statusCode,
+        'Failed to fetch business locations: ${response.body}',
+      );
+    }
+
+    final responseData = decodeJson(response);
+    final List<dynamic> businessData;
+    if (responseData['data'] is List) {
+      businessData = responseData['data'] as List<dynamic>;
+    } else if (responseData['businesses'] is List) {
+      businessData = responseData['businesses'] as List<dynamic>;
+    } else {
+      businessData = const [];
+    }
+
+    return businessData.map((json) => _parseBusinessLocation(json)).toList();
+  }
+
+  @override
+  Future<void> updateEmployerProfile(
+    String employerId, {
+    String? companyName,
+    String? description,
+    String? phone,
+    String? profilePicture,
+    String? profilePictureSmall,
+    String? profilePictureMedium,
+    String? profilePictureLarge,
+    String? companyLogo,
+    String? companyLogoSmall,
+    String? companyLogoMedium,
+    String? companyLogoLarge,
+  }) async {
+    final body = <String, dynamic>{};
+
+    if (companyName != null) body['companyName'] = companyName;
+    if (description != null) body['description'] = description;
+    if (phone != null) body['phone'] = phone;
+    if (profilePicture != null) body['profilePicture'] = profilePicture;
+    if (profilePictureSmall != null) {
+      body['profilePictureSmall'] = profilePictureSmall;
+    }
+    if (profilePictureMedium != null) {
+      body['profilePictureMedium'] = profilePictureMedium;
+    }
+    if (profilePictureLarge != null) {
+      body['profilePictureLarge'] = profilePictureLarge;
+    }
+    if (companyLogo != null) body['companyLogo'] = companyLogo;
+    if (companyLogoSmall != null) body['companyLogoSmall'] = companyLogoSmall;
+    if (companyLogoMedium != null) {
+      body['companyLogoMedium'] = companyLogoMedium;
+    }
+    if (companyLogoLarge != null) body['companyLogoLarge'] = companyLogoLarge;
+
+    final response = await client.patch(
+      resolve('api/employers/$employerId'),
+      headers: headers(authToken: _authToken),
+      body: jsonEncode(body),
+    );
+
+    if (response.statusCode != 200) {
+      throw ApiWorkConnectException(
+        response.statusCode,
+        'Failed to update employer profile: ${response.body}',
+      );
+    }
   }
 
   @override

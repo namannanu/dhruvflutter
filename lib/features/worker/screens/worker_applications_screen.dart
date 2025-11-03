@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/state/app_state.dart';
 import 'package:talent/core/models/models.dart';
+import 'package:talent/core/utils/image_url_optimizer.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/shared/screens/messaging_screen.dart';
 import 'package:talent/features/shared/services/conversation_api_service.dart';
@@ -215,13 +216,14 @@ class _ApplicationCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   BusinessLogoAvatar(
-                    logoUrl: application.job!.businessLogoSquareUrl ??
-                        application.job!.businessLogoUrl ??
-                        application.job!.businessLogoOriginalUrl,
+                    logoUrl: application.job!.businessLogoSmall ??
+                        application.job!.businessLogoSmall ??
+                        application.job!.businessLogoSmall,
                     name: application.job!.businessName.isNotEmpty
                         ? application.job!.businessName
                         : application.job!.title,
                     size: 40,
+                    imageContext: ImageContext.jobList,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -527,7 +529,7 @@ class _ApplicationCard extends StatelessWidget {
           scheduleStart: DateTime.now(),
           scheduleEnd: DateTime.now(),
           recurrence: 'one-time',
-          overtimeRate: 0,
+          overtime: JobOvertime.fromJson(const {}),
           urgency: 'medium',
           tags: const [],
           workDays: const [],
@@ -538,6 +540,7 @@ class _ApplicationCard extends StatelessWidget {
           applicantsCount: 0,
           businessName: '',
           businessAddress: '',
+          createdByName: '',
         );
       }
 
@@ -732,9 +735,14 @@ class _ApplicationCard extends StatelessWidget {
       case ApplicationStatus.pending:
         return scheme.primary;
       case ApplicationStatus.hired:
+      case ApplicationStatus.completed:
         return scheme.secondary;
       case ApplicationStatus.rejected:
         return scheme.error;
+      case ApplicationStatus.accepted:
+        return scheme.tertiary;
+      case ApplicationStatus.cancelled:
+        return scheme.surfaceContainerHighest;
     }
   }
 
@@ -746,6 +754,12 @@ class _ApplicationCard extends StatelessWidget {
         return 'Hired';
       case ApplicationStatus.rejected:
         return 'Rejected';
+      case ApplicationStatus.accepted:
+        return 'Under consideration';
+      case ApplicationStatus.completed:
+        return 'Completed';
+      case ApplicationStatus.cancelled:
+        return 'Cancelled';
     }
   }
 }

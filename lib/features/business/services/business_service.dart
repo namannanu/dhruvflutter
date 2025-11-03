@@ -1,4 +1,6 @@
-import 'package:talent/core/models/models.dart';
+import 'package:talent/core/models/analytics.dart';
+import 'package:talent/core/models/models.dart' hide TeamMember;
+import 'package:talent/core/models/team_access.dart';
 
 abstract class BusinessService {
   Future<BusinessLocation> createBusiness({
@@ -8,8 +10,11 @@ abstract class BusinessService {
     required String city,
     required String state,
     required String postalCode,
-    required String phone,
+    String? phone,
     String? logoUrl,
+    String? logoSmall,
+    String? logoMedium,
+    String? logoLarge,
     // Google Places API location data
     double? latitude,
     double? longitude,
@@ -31,6 +36,9 @@ abstract class BusinessService {
     String? phone,
     bool? isActive,
     String? logoUrl,
+    String? logoSmall,
+    String? logoMedium,
+    String? logoLarge,
     double? allowedRadius,
   });
 

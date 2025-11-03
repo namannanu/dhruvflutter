@@ -168,7 +168,7 @@ class _EmployerWorkerProfileScreenState
                       submittedLabel: submittedLabel,
                       firstName: profile?.firstName ?? workerUser?.firstName,
                       lastName: profile?.lastName ?? workerUser?.lastName,
-                      profilePictureUrl: profile?.profilePictureUrl,
+                      profilePictureUrl: profile?.profilePictureSmall,
                     ),
                     const SizedBox(height: 16),
                     _ExperienceCard(experience: experience, bio: bio),

@@ -233,6 +233,14 @@ class EmployerProfile {
     required this.totalJobsPosted,
     required this.totalHires,
     required this.activeBusinesses,
+    this.profilePicture,
+    this.profilePictureSmall,
+    this.profilePictureMedium,
+    this.profilePictureLarge,
+    this.companyLogo,
+    this.companyLogoSmall,
+    this.companyLogoMedium,
+    this.companyLogoLarge,
   });
 
   final String id;
@@ -243,6 +251,14 @@ class EmployerProfile {
   final int totalJobsPosted;
   final int totalHires;
   final int activeBusinesses;
+  final String? profilePicture;
+  final String? profilePictureSmall;
+  final String? profilePictureMedium;
+  final String? profilePictureLarge;
+  final String? companyLogo;
+  final String? companyLogoSmall;
+  final String? companyLogoMedium;
+  final String? companyLogoLarge;
 
   EmployerProfile copyWith({
     String? companyName,
@@ -252,6 +268,14 @@ class EmployerProfile {
     int? totalJobsPosted,
     int? totalHires,
     int? activeBusinesses,
+    String? profilePicture,
+    String? profilePictureSmall,
+    String? profilePictureMedium,
+    String? profilePictureLarge,
+    String? companyLogo,
+    String? companyLogoSmall,
+    String? companyLogoMedium,
+    String? companyLogoLarge,
   }) {
     return EmployerProfile(
       id: id,
@@ -262,6 +286,14 @@ class EmployerProfile {
       totalJobsPosted: totalJobsPosted ?? this.totalJobsPosted,
       totalHires: totalHires ?? this.totalHires,
       activeBusinesses: activeBusinesses ?? this.activeBusinesses,
+      profilePicture: profilePicture ?? this.profilePicture,
+      profilePictureSmall: profilePictureSmall ?? this.profilePictureSmall,
+      profilePictureMedium: profilePictureMedium ?? this.profilePictureMedium,
+      profilePictureLarge: profilePictureLarge ?? this.profilePictureLarge,
+      companyLogo: companyLogo ?? this.companyLogo,
+      companyLogoSmall: companyLogoSmall ?? this.companyLogoSmall,
+      companyLogoMedium: companyLogoMedium ?? this.companyLogoMedium,
+      companyLogoLarge: companyLogoLarge ?? this.companyLogoLarge,
     );
   }
 }
@@ -287,8 +319,9 @@ class BusinessLocation {
     this.timezone,
     this.notes,
     this.logoUrl,
-    this.logoOriginalUrl,
-    this.logoSquareUrl,
+    this.logoSmall,
+    this.logoMedium,
+    this.logoLarge,
   });
 
   final String id;
@@ -309,8 +342,9 @@ class BusinessLocation {
   final String? timezone;
   final String? notes;
   final String? logoUrl;
-  final String? logoOriginalUrl;
-  final String? logoSquareUrl;
+  final String? logoSmall;
+  final String? logoMedium;
+  final String? logoLarge;
 
   /// e.g. "123 Market St, San Francisco, CA 94105"
   String get fullAddress {
@@ -375,7 +409,10 @@ class BusinessLocation {
       city: s(json['city'] ?? addr?['city'] ?? loc?['city']),
       state: s(json['state'] ?? addr?['state'] ?? loc?['state']),
       postalCode: s(
-        json['postalCode'] ?? addr?['postalCode'] ?? addr?['zip'] ?? loc?['postalCode'],
+        json['postalCode'] ??
+            addr?['postalCode'] ??
+            addr?['zip'] ??
+            loc?['postalCode'],
       ),
       phone: s(json['phone'] ?? json['contactPhone']),
       type: () {
@@ -391,8 +428,9 @@ class BusinessLocation {
       timezone: s(loc?['timezone']),
       notes: s(loc?['notes']),
       logoUrl: logoData['logoUrl'],
-      logoOriginalUrl: logoData['logoOriginalUrl'],
-      logoSquareUrl: logoData['logoSquareUrl'],
+      logoSmall: logoData['logoSmall'],
+      logoMedium: logoData['logoMedium'],
+      logoLarge: logoData['logoLarge'],
     );
   }
 
@@ -452,10 +490,10 @@ class BusinessLocation {
       'jobCount': jobCount,
       'hireCount': hireCount,
       if (logoUrl != null && logoUrl!.isNotEmpty) 'logoUrl': logoUrl,
-      if (logoOriginalUrl != null && logoOriginalUrl!.isNotEmpty)
-        'logoOriginalUrl': logoOriginalUrl,
-      if (logoSquareUrl != null && logoSquareUrl!.isNotEmpty)
-        'logoSquareUrl': logoSquareUrl,
+      if (logoSmall != null && logoSmall!.isNotEmpty) 'logoSmall': logoSmall,
+      if (logoMedium != null && logoMedium!.isNotEmpty)
+        'logoMedium': logoMedium,
+      if (logoLarge != null && logoLarge!.isNotEmpty) 'logoLarge': logoLarge,
       if (locationMap.isNotEmpty) 'location': locationMap,
     };
   }
@@ -594,6 +632,7 @@ class TeamMember {
         user: user,
         businessId: businessContext['businessId']?.toString() ??
             json['businessId']?.toString() ??
+            json['business']?.toString() ??
             '',
         role: json['role']?.toString() ??
             json['accessLevel']?.toString() ??

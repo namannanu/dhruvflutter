@@ -6,8 +6,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:talent/core/services/image_optimization_service.dart';
+import 'package:talent/core/utils/image_url_optimizer.dart';
 import 'package:talent/features/shared/widgets/profile_picture_avatar.dart';
-import 'package:talent/features/worker/models/availability.dart';
 
 class EditableProfileForm extends StatelessWidget {
   const EditableProfileForm({
@@ -21,8 +21,6 @@ class EditableProfileForm extends StatelessWidget {
     required this.skillsController,
     required this.languagesController,
     required this.profilePictureUrlController,
-    required this.availability,
-    required this.onAvailabilityChanged,
     required this.notificationsEnabled,
     required this.onNotificationsChanged,
   });
@@ -36,14 +34,12 @@ class EditableProfileForm extends StatelessWidget {
   final TextEditingController skillsController;
   final TextEditingController languagesController;
   final TextEditingController profilePictureUrlController;
-  final List<DayAvailability> availability;
-  final ValueChanged<List<DayAvailability>> onAvailabilityChanged;
   final bool notificationsEnabled;
   final ValueChanged<bool> onNotificationsChanged;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    Theme.of(context);
     return Form(
       key: formKey,
       autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -74,10 +70,12 @@ class EditableProfileForm extends StatelessWidget {
                           ? 'User'
                           : firstNameController.text,
                       lastName: lastNameController.text,
-                      profilePictureUrl: profilePictureUrlController.text.trim().isEmpty
-                          ? null
-                          : profilePictureUrlController.text.trim(),
+                      profilePictureUrl:
+                          profilePictureUrlController.text.trim().isEmpty
+                              ? null
+                              : profilePictureUrlController.text.trim(),
                       size: 56,
+                      imageContext: ImageContext.workerProfile,
                     ),
                   ],
                 ),
@@ -99,11 +97,6 @@ class EditableProfileForm extends StatelessWidget {
                       ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'You can paste an image URL or upload a PNG, JPG, WEBP file. Uploaded images are converted to a data URL for storage.',
-                  style: theme.textTheme.bodySmall,
-                ),
               ],
             ),
           ),
@@ -119,6 +112,7 @@ class EditableProfileForm extends StatelessWidget {
                   textCapitalization: TextCapitalization.words,
                   textInputAction: TextInputAction.next,
                   validator: (value) => _requiredValidator(value, 'first name'),
+                  hintText: 'first name',
                 ),
                 _Field(
                   controller: lastNameController,
@@ -126,6 +120,7 @@ class EditableProfileForm extends StatelessWidget {
                   textCapitalization: TextCapitalization.words,
                   textInputAction: TextInputAction.next,
                   validator: (value) => _requiredValidator(value, 'last name'),
+                  hintText: 'last name',
                 ),
                 _Field(
                   controller: phoneController,
@@ -133,6 +128,7 @@ class EditableProfileForm extends StatelessWidget {
                   keyboardType: TextInputType.phone,
                   textInputAction: TextInputAction.next,
                   validator: _phoneValidator,
+                  hintText: 'phone number',
                 ),
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
@@ -155,66 +151,34 @@ class EditableProfileForm extends StatelessWidget {
                 _Field(
                   controller: bioController,
                   label: 'Bio',
+                  hintText: 'Tell us about yourself',
                   maxLines: 4,
                   textInputAction: TextInputAction.newline,
-                  helperText: 'Share a short introduction about your experience.',
+                  helperText:
+                      'Share a short introduction about your experience.',
                 ),
                 _Field(
                   controller: experienceController,
                   label: 'Experience',
                   textInputAction: TextInputAction.next,
+                  hintText: 'Describe your work history',
                 ),
                 _Field(
                   controller: skillsController,
                   label: 'Skills',
                   helperText: 'Separate multiple skills with commas.',
                   textInputAction: TextInputAction.next,
+                  hintText: 'List your key skills',
                 ),
                 _Field(
                   controller: languagesController,
                   label: 'Languages',
                   helperText: 'Separate multiple languages with commas.',
+                  hintText: 'List languages you speak',
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          _SectionCard(
-            title: 'Weekly availability',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (availability.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      'Add the days and time slots you are available to work.',
-                    ),
-                  )
-                else
-                  ...availability.asMap().entries.map(
-                    (entry) => DayEditor(
-                      day: entry.value,
-                      onChanged: (updated) {
-                        final newList = [...availability];
-                        newList[entry.key] = updated;
-                        onAvailabilityChanged(newList);
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          if (availability.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                'Tip: keep your availability current so employers can offer the right shifts.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.secondary,
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -243,7 +207,14 @@ class EditableProfileForm extends StatelessWidget {
     try {
       const typeGroup = XTypeGroup(
         label: 'images',
-        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'],
+        // UTIs for iOS/macOS
+        uniformTypeIdentifiers: [
+          'public.image',
+          'public.jpeg',
+          'public.png',
+        ],
+        // Extensions for other platforms
+        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'],
       );
       final file = await openFile(acceptedTypeGroups: [typeGroup]);
       if (file == null) return;
@@ -261,7 +232,8 @@ class EditableProfileForm extends StatelessWidget {
       final mime = file.mimeType ?? _lookupMimeType(file.name);
       final dataUrl = 'data:$mime;base64,${base64Encode(bytes)}';
       final optimized =
-          ImageOptimizationService.optimizeDataUrl(dataUrl) ?? dataUrl;
+          ImageOptimizationService.optimizeProfilePictureDataUrl(dataUrl) ??
+              dataUrl;
 
       if (kDebugMode) {
         debugPrint(
@@ -269,7 +241,7 @@ class EditableProfileForm extends StatelessWidget {
           '${optimized.length} chars (was ${dataUrl.length})',
         );
       }
-      
+
       profilePictureUrlController.text = optimized;
     } catch (error) {
       if (context.mounted) {
@@ -301,136 +273,6 @@ class EditableProfileForm extends StatelessWidget {
       default:
         return 'image/png';
     }
-  }
-}
-
-class DayEditor extends StatelessWidget {
-  const DayEditor({super.key, required this.day, required this.onChanged});
-
-  final DayAvailability day;
-  final ValueChanged<DayAvailability> onChanged;
-
-  static TimeOfDay _parseTime(String value) {
-    final parts = value.split(':');
-    final hour = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 9 : 9;
-    final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
-    return TimeOfDay(hour: hour, minute: minute);
-  }
-
-  static String _formatTime(TimeOfDay time) {
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    Future<void> editSlot(int slotIndex) async {
-      final current = day.timeSlots[slotIndex];
-      final initialStart = _parseTime(current.startTime);
-      final initialEnd = _parseTime(current.endTime);
-
-      final start = await showTimePicker(
-        context: context,
-        initialTime: initialStart,
-        helpText: 'Select start time',
-      );
-      if (start == null) return;
-
-      final end = await showTimePicker(
-        // ignore: use_build_context_synchronously
-        context: context,
-        initialTime: initialEnd.hour > start.hour ||
-                (initialEnd.hour == start.hour &&
-                    initialEnd.minute >= start.minute)
-            ? initialEnd
-            : TimeOfDay(
-                hour: (start.hour + 1).clamp(0, 23).toInt(),
-                minute: start.minute,
-              ),
-        helpText: 'Select end time',
-      );
-      if (end == null) return;
-
-      final updatedSlots = [...day.timeSlots];
-      updatedSlots[slotIndex] = TimeSlot(_formatTime(start), _formatTime(end));
-
-      onChanged(day.copyWith(timeSlots: updatedSlots));
-    }
-
-    void addSlot() {
-      final updatedSlots = [
-        ...day.timeSlots,
-        TimeSlot('09:00', '17:00'),
-      ];
-      onChanged(
-        day.copyWith(
-          isAvailable: true,
-          timeSlots: updatedSlots,
-        ),
-      );
-      Future.microtask(() => editSlot(updatedSlots.length - 1));
-    }
-
-    void removeSlot(int index) {
-      final updatedSlots = [...day.timeSlots]..removeAt(index);
-      onChanged(
-        day.copyWith(timeSlots: updatedSlots),
-      );
-    }
-
-    final hasSlots = day.timeSlots.isNotEmpty;
-
-    return ExpansionTile(
-      title: Text(
-        day.day[0].toUpperCase() + day.day.substring(1),
-        style: Theme.of(context).textTheme.titleMedium,
-      ),
-      trailing: Switch(
-        value: day.isAvailable,
-        onChanged: (val) => onChanged(
-          val
-              ? day.copyWith(isAvailable: true)
-              : day.copyWith(isAvailable: false, timeSlots: []),
-        ),
-      ),
-      children: [
-        if (!hasSlots)
-          const ListTile(
-            title: Text('No time slots added'),
-            subtitle: Text('Add the times you are available to work.'),
-          ),
-        ...day.timeSlots.asMap().entries.map(
-              (entry) => ListTile(
-                title:
-                    Text('${entry.value.startTime} - ${entry.value.endTime}'),
-                trailing: Wrap(
-                  spacing: 8,
-                  children: [
-                    IconButton(
-                      tooltip: 'Edit time',
-                      icon: const Icon(Icons.edit),
-                      onPressed: () => editSlot(entry.key),
-                    ),
-                    IconButton(
-                      tooltip: 'Remove',
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () => removeSlot(entry.key),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: addSlot,
-            icon: const Icon(Icons.add),
-            label: const Text('Add time slot'),
-          ),
-        ),
-      ],
-    );
   }
 }
 
@@ -476,6 +318,7 @@ class _Field extends StatelessWidget {
     this.validator,
     this.helperText,
     this.maxLines = 1,
+    required String hintText,
   });
 
   final TextEditingController controller;

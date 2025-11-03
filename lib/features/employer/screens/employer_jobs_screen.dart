@@ -5,8 +5,10 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/core/utils/job_display_utils.dart';
 import 'package:talent/features/employer/screens/employer_job_create_screen.dart';
 import 'package:talent/features/employer/screens/job_payment_screen.dart';
+import 'package:talent/core/utils/image_url_optimizer.dart';
 import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/shared/mixins/auto_refresh_mixin.dart';
@@ -22,7 +24,7 @@ class EmployerJobsScreen extends StatefulWidget {
 class _EmployerJobsScreenState extends State<EmployerJobsScreen>
     with AutoRefreshMixin<EmployerJobsScreen> {
   JobStatus? _jobStatusFilter;
-  
+
   Null get trailing => null; // null = all, active, closed, filled
 
   @override
@@ -36,17 +38,39 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen>
     if (_jobStatusFilter == null) {
       return jobs;
     }
-    return jobs.where((job) => job.status == _jobStatusFilter).toList();
+    return jobs.where((job) {
+      // First check the job status
+      if (job.status != _jobStatusFilter) {
+        return false;
+      }
+
+      // For active jobs, only show published ones
+      if (job.status == JobStatus.active && !job.isPublished) {
+        return false;
+      }
+
+      return true;
+    }).toList();
   }
 
   String _getStatusLabel(JobStatus status) {
     switch (status) {
       case JobStatus.active:
         return 'Open';
-      case JobStatus.closed:
-        return 'Closed';
       case JobStatus.filled:
         return 'Filled';
+      case JobStatus.closed:
+        return 'Closed';
+      case JobStatus.paused:
+        return 'Paused';
+      case JobStatus.expired:
+        return 'Expired';
+      case JobStatus.deleted:
+        return 'Removed';
+      case JobStatus.completed:
+        return 'Completed';
+      case JobStatus.draft:
+        return 'Draft';
     }
   }
 
@@ -178,27 +202,39 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen>
           if (filteredJobs.isEmpty)
             Card(
               child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                const Icon(Icons.work_outline, size: 48),
-                const SizedBox(height: 10),
-                Text(
-                  _jobStatusFilter == null
-                    ? 'No job postings yet. Tap "Create new job" to get started.'
-                    : 'No ${_getStatusLabel(_jobStatusFilter!).toLowerCase()} jobs found.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 10),
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    const Icon(Icons.work_outline, size: 48),
+                    const SizedBox(height: 10),
+                    Text(
+                      _jobStatusFilter == null
+                          ? 'No job postings yet. Tap "Create new job" to get started.'
+                          : 'No ${_getStatusLabel(_jobStatusFilter!).toLowerCase()} jobs found.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                  ],
                 ),
-                ],
-              ),
               ),
             )
           else
-            ...filteredJobs.map((job) => _JobTile(
-                  job: job,
-                  onCloseJob: _closeJobPost,
-                )),
+            ...filteredJobs.map((job) {
+              // Find the business for this job
+              BusinessLocation? business;
+              for (final candidate in appState.businesses) {
+                if (candidate.id == job.businessId) {
+                  business = candidate;
+                  break;
+                }
+              }
+
+              return _JobTile(
+                job: job,
+                business: business,
+                onCloseJob: _closeJobPost,
+              );
+            }),
           const SizedBox(height: 24),
           if (applications.isNotEmpty)
             Column(
@@ -319,36 +355,91 @@ class _FilterChip extends StatelessWidget {
 class _JobTile extends StatelessWidget {
   const _JobTile({
     required this.job,
+    this.business,
     required this.onCloseJob,
   });
 
   final JobPosting job;
+  final BusinessLocation? business;
   final Function(BuildContext, JobPosting) onCloseJob;
+
+  String _getDisplayAddress() {
+    // Priority 1: Use job's specific business address (includes custom address)
+    if (job.businessAddress.isNotEmpty) {
+      return job.businessAddress;
+    }
+
+    // Priority 2: Use business address from business object
+    if (business?.address.isNotEmpty == true) {
+      return business!.address;
+    }
+
+    // Priority 3: Try to build from business name
+    if (job.businessName.isNotEmpty) {
+      return job.businessName;
+    }
+
+    return 'Location not specified';
+  }
+
+  String _formatSchedule() {
+    final sameDay = job.scheduleStart.year == job.scheduleEnd.year &&
+        job.scheduleStart.month == job.scheduleEnd.month &&
+        job.scheduleStart.day == job.scheduleEnd.day;
+    final dayFormatter = DateFormat('EEE, MMM d');
+    final timeFormatter = DateFormat('h:mm a');
+
+    final startDay = dayFormatter.format(job.scheduleStart);
+    final endDay = dayFormatter.format(job.scheduleEnd);
+    final startTime = timeFormatter.format(job.scheduleStart);
+    final endTime = timeFormatter.format(job.scheduleEnd);
+
+    if (sameDay) {
+      return '$startDay • $startTime - $endTime';
+    }
+
+    final startFull = '$startDay • $startTime';
+    final endFull = '$endDay • $endTime';
+    return '$startFull → $endFull';
+  }
+
+  String _formatRecurrence() {
+    return JobDisplayUtils.formatRecurrence(job.recurrence);
+  }
+
+  String _capitalize(String input) {
+    if (input.isEmpty) return input;
+    return input[0].toUpperCase() + input.substring(1);
+  }
+
+  String _formatPayRate() {
+    final base = '\$${job.hourlyRate.toStringAsFixed(0)}/hr';
+    if (!job.overtime.allowed) return base;
+
+    final overtimeRate =
+        job.hourlyRate * (job.overtime.rateMultiplier <= 0 ? 1.5 : job.overtime.rateMultiplier);
+    final overtimeLabel =
+        '\$${overtimeRate.toStringAsFixed(0)}/hr overtime';
+    return '$base ($overtimeLabel)';
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final needsPayment = job.premiumRequired;
+    final needsPublishing = !job.isPublished && job.status == JobStatus.active;
     final statusColor =
         needsPayment ? Colors.orange : _statusColor(context, job.status);
     final statusLabel = needsPayment ? 'Payment pending' : job.status.name;
-    final formatter = DateFormat('MMM d · HH:mm');
     final appState = context.watch<AppState>();
     final accessInfo = appState.jobAccessInfo(job);
-    BusinessLocation? business;
-    for (final candidate in appState.businesses) {
-      if (candidate.id == job.businessId) {
-        business = candidate;
-        break;
-      }
-    }
 
-    final businessLogoUrl = job.businessLogoSquareUrl ??
-        job.businessLogoUrl ??
-        job.businessLogoOriginalUrl ??
-        business?.logoSquareUrl ??
+    final businessLogoUrl = job.businessLogoSmall ??
+        job.businessLogoSmall ??
+        job.businessLogoSmall ??
+      
         business?.logoUrl ??
-        business?.logoOriginalUrl;
+        business?.logoSmall;
     final businessDisplayName = job.businessName.isNotEmpty
         ? job.businessName
         : business?.name ?? job.title;
@@ -371,6 +462,7 @@ class _JobTile extends StatelessWidget {
                         logoUrl: businessLogoUrl,
                         name: businessDisplayName,
                         size: 44,
+                        imageContext: ImageContext.jobList,
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -427,33 +519,32 @@ class _JobTile extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Text(
-                    job.description,
-                    style: theme.textTheme.bodyMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  _JobDetailItem(
+                    icon: Icons.location_on_outlined,
+                    label: 'Location',
+                    value: _getDisplayAddress(),
                   ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Icon(Icons.access_time,
-                          size: 16, color: theme.colorScheme.outline),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          '${formatter.format(job.scheduleStart)} - ${formatter.format(job.scheduleEnd)}',
-                          style: theme.textTheme.bodySmall,
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      ),
-                      Text(
-                        '\$${job.hourlyRate.toStringAsFixed(0)}/hr',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                  _JobDetailItem(
+                    icon: Icons.sticky_note_2_outlined,
+                    label: 'Description',
+                    value: job.description.isNotEmpty
+                        ? job.description
+                        : 'No description provided.',
+                  ),
+                  _JobDetailItem(
+                    icon: Icons.repeat_outlined,
+                    label: 'Frequency',
+                    value: _formatRecurrence(),
+                  ),
+                  _JobDetailItem(
+                    icon: Icons.schedule_outlined,
+                    label: 'Schedule',
+                    value: _formatSchedule(),
+                  ),
+                  _JobDetailItem(
+                    icon: Icons.payments_outlined,
+                    label: 'Pay rate',
+                    value: _formatPayRate(),
                   ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -493,8 +584,7 @@ class _JobTile extends StatelessWidget {
                       if (needsPayment)
                         OutlinedButton.icon(
                           onPressed: () async {
-                            final paymentCompleted =
-                                await Navigator.of(context).push<bool>(
+                            await Navigator.of(context).push<bool>(
                               MaterialPageRoute(
                                 builder: (context) => JobPaymentScreen(
                                   jobId: job.id,
@@ -503,32 +593,39 @@ class _JobTile extends StatelessWidget {
                                 ),
                               ),
                             );
-                            if (paymentCompleted == true && context.mounted) {
+                            if (context.mounted) {
                               await context
                                   .read<AppState>()
                                   .refreshActiveRole();
                             }
                           },
                           icon: const Icon(Icons.credit_card_outlined),
-                          label: const Text('Pay & publish'),
+                          label: const Text('Pay & Publish'),
+                        )
+                      else if (needsPublishing)
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final state = context.read<AppState>();
+                            await state.publishJob(job.id);
+                            if (context.mounted) {
+                              await context
+                                  .read<AppState>()
+                                  .refreshActiveRole();
+                            }
+                          },
+                          icon: const Icon(Icons.publish),
+                          label: const Text('Publish'),
                         )
                       else
                         OutlinedButton.icon(
                           onPressed: null,
                           icon: Icon(
-                            Icons.check_circle,
+                            Icons.check_circle_outline,
                             color: theme.colorScheme.primary,
                           ),
                           label: Text(
-                            'Published',
+                            job.isPublished ? 'Published' : job.publishStatus,
                             style: TextStyle(
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            disabledForegroundColor: theme.colorScheme.primary,
-                            side: BorderSide(
                               color: theme.colorScheme.primary,
                             ),
                           ),
@@ -545,16 +642,80 @@ class _JobTile extends StatelessWidget {
   }
 }
 
+class _JobDetailItem extends StatelessWidget {
+  const _JobDetailItem({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            icon,
+            size: 18,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: theme.textTheme.bodyMedium,
+                  softWrap: false,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // Helper function for determining job status colors
 Color _statusColor(BuildContext context, JobStatus status) {
   final scheme = Theme.of(context).colorScheme;
   switch (status) {
     case JobStatus.active:
       return scheme.primary;
-    case JobStatus.filled:
-      return scheme.secondary;
     case JobStatus.closed:
       return scheme.error;
+    case JobStatus.filled:
+      return scheme.secondary;
+    case JobStatus.paused:
+      return scheme.tertiary;
+    case JobStatus.expired:
+      return scheme.error.withValues(alpha: 0.8);
+    case JobStatus.deleted:
+      return scheme.error;
+    case JobStatus.completed:
+      return scheme.primary;
+    case JobStatus.draft:
+      return scheme.outline;
   }
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/worker/screens/worker_privacy_settings_screen.dart';
 import 'package:talent/features/worker/screens/worker_profile_screen_new.dart';
 import 'package:talent/features/worker/widgets/feedback_dialog.dart';
@@ -56,16 +57,22 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
         title: const Text('Settings'),
       ),
       body: ListView(
+        padding: const EdgeInsets.all(24),
         children: [
-          // Profile Section
-          _SettingsSection(
-            title: 'Profile & Account',
-            items: [
-              ListTile(
-                leading: const Icon(Icons.person_outline),
-                title: const Text('Edit Profile'),
-                subtitle: const Text('Update your personal information'),
-                trailing: const Icon(Icons.chevron_right),
+          const SectionHeader(
+            title: 'Worker settings',
+            subtitle: 'Manage your profile, alerts, and preferences',
+            style: TextStyle(fontSize: 16),
+          ),
+          const SizedBox(height: 24),
+          _SettingsBlock(
+            title: 'Profile & account',
+            subtitle: 'Keep your personal details current',
+            children: [
+              _SettingsTileCard(
+                icon: Icons.person_outline,
+                title: 'Edit profile',
+                subtitle: 'Update skills, experience, and availability',
                 onTap: () {
                   Navigator.push(
                     context,
@@ -77,17 +84,17 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
               ),
             ],
           ),
-
-          // Notifications Section
-          _SettingsSection(
+          _SettingsBlock(
             title: 'Notifications',
-            items: [
-              SwitchListTile(
-                secondary: const Icon(Icons.notifications_outlined),
-                title: const Text('Push Notifications'),
-                subtitle: const Text('Receive alerts for new jobs and updates'),
+            subtitle: 'Choose how you hear about new jobs',
+            children: [
+              _SettingsToggleCard(
+                icon: Icons.notifications_active_outlined,
+                title: 'Push notifications',
+                subtitle: 'Receive alerts for new jobs and updates',
                 value: appState.workerProfile?.notificationsEnabled ?? false,
-                onChanged: (bool value) async {
+                iconColor: theme.colorScheme.primary,
+                onChanged: (value) async {
                   await _updateNotificationSetting(
                     pushEnabled: value,
                     successMessage: 'Push notifications settings updated',
@@ -95,13 +102,14 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
                   );
                 },
               ),
-              SwitchListTile(
-                secondary: const Icon(Icons.email_outlined),
-                title: const Text('Email Notifications'),
-                subtitle: const Text('Receive job updates via email'),
+              _SettingsToggleCard(
+                icon: Icons.email_outlined,
+                title: 'Email notifications',
+                subtitle: 'Receive job updates via email',
                 value:
                     appState.workerProfile?.emailNotificationsEnabled ?? true,
-                onChanged: (bool value) async {
+                iconColor: theme.colorScheme.secondary,
+                onChanged: (value) async {
                   await _updateNotificationSetting(
                     emailEnabled: value,
                     successMessage: 'Email notifications settings updated',
@@ -111,16 +119,14 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
               ),
             ],
           ),
-
-          // Privacy & Security
-          _SettingsSection(
-            title: 'Privacy & Security',
-            items: [
-              ListTile(
-                leading: const Icon(Icons.security_outlined),
-                title: const Text('Privacy Settings'),
-                subtitle: const Text('Control your data and visibility'),
-                trailing: const Icon(Icons.chevron_right),
+          _SettingsBlock(
+            title: 'Privacy & security',
+            subtitle: 'Control who sees your information',
+            children: [
+              _SettingsTileCard(
+                icon: Icons.security_outlined,
+                title: 'Privacy settings',
+                subtitle: 'Manage visibility and data sharing',
                 onTap: () {
                   Navigator.push(
                     context,
@@ -130,10 +136,10 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
                   );
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.password_outlined),
-                title: const Text('Change Password'),
-                trailing: const Icon(Icons.chevron_right),
+              _SettingsTileCard(
+                icon: Icons.password_outlined,
+                title: 'Change password',
+                subtitle: 'Add extra security to your account',
                 onTap: () {
                   Navigator.push(
                     context,
@@ -146,15 +152,14 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
               ),
             ],
           ),
-
-          // Support & About
-          _SettingsSection(
-            title: 'Support & About',
-            items: [
-              ListTile(
-                leading: const Icon(Icons.help_outline),
-                title: const Text('Help & Support'),
-                trailing: const Icon(Icons.chevron_right),
+          _SettingsBlock(
+            title: 'Support & about',
+            subtitle: 'Get help and learn more about the app',
+            children: [
+              _SettingsTileCard(
+                icon: Icons.help_outline,
+                title: 'Help & support',
+                subtitle: 'Browse guides or contact support',
                 onTap: () {
                   Navigator.push(
                     context,
@@ -164,21 +169,26 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
                   );
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.info_outline),
-                title: const Text('About'),
-                subtitle: FutureBuilder<PackageInfo>(
+              _SettingsTileCard(
+                icon: Icons.info_outline,
+                title: 'About',
+                subtitleWidget: FutureBuilder<PackageInfo>(
                   future: PackageInfo.fromPlatform(),
                   builder: (context, snapshot) {
-                    if (snapshot.hasData) {
-                      return Text('Version ${snapshot.data!.version}');
-                    }
-                    return const Text('Loading version...');
+                    final version = snapshot.data?.version;
+                    return Text(
+                      version != null
+                          ? 'Version $version'
+                          : 'Loading version…',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    );
                   },
                 ),
-                trailing: const Icon(Icons.chevron_right),
                 onTap: () async {
                   final packageInfo = await PackageInfo.fromPlatform();
+                  if (!mounted) return;
                   showAboutDialog(
                     context: context,
                     applicationName: packageInfo.appName,
@@ -190,16 +200,14 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
               ),
             ],
           ),
-
-          // Feedback Section
-          _SettingsSection(
+          _SettingsBlock(
             title: 'Feedback',
-            items: [
-              ListTile(
-                leading: const Icon(Icons.feedback_outlined),
-                title: const Text('Employer Feedback'),
-                subtitle: const Text('Share your experience with employers'),
-                trailing: const Icon(Icons.chevron_right),
+            subtitle: 'Share how employers work with you',
+            children: [
+              _SettingsTileCard(
+                icon: Icons.feedback_outlined,
+                title: 'Employer feedback',
+                subtitle: 'Send feedback about your job experiences',
                 onTap: () {
                   context
                       .read<AppState>()
@@ -212,22 +220,21 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
               ),
             ],
           ),
-
-          // Account Actions
-          _SettingsSection(
+          _SettingsBlock(
             title: 'Account',
-            items: [
-              ListTile(
-                leading: Icon(Icons.logout, color: theme.colorScheme.error),
-                title: Text(
-                  'Sign Out',
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
+            subtitle: 'Quick actions for your account access',
+            children: [
+              _SettingsTileCard(
+                icon: Icons.logout,
+                iconColor: theme.colorScheme.error,
+                titleColor: theme.colorScheme.error,
+                title: 'Sign out',
+                subtitle: 'Log out from this device',
                 onTap: () async {
                   final confirmed = await showDialog<bool>(
                     context: context,
                     builder: (context) => AlertDialog(
-                      title: const Text('Sign Out'),
+                      title: const Text('Sign out'),
                       content: const Text('Are you sure you want to sign out?'),
                       actions: [
                         TextButton(
@@ -284,37 +291,6 @@ class WorkerChangePasswordScreen extends StatelessWidget {
   }
 }
 
-class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({
-    required this.title,
-    required this.items,
-  });
-
-  final String title;
-  final List<Widget> items;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-          child: Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.primary,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-        ),
-        ...items,
-        const Divider(),
-      ],
-    );
-  }
-}
-
 class WorkerHelpSupportScreen extends StatelessWidget {
   const WorkerHelpSupportScreen({super.key});
 
@@ -365,6 +341,181 @@ class WorkerHelpSupportScreen extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SettingsBlock extends StatelessWidget {
+  const _SettingsBlock({
+    required this.title,
+    required this.subtitle,
+    required this.children,
+  });
+
+  final String title;
+  final String subtitle;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(
+          title: title,
+          subtitle: subtitle,
+          style: const TextStyle(fontSize: 10),
+        ),
+        const SizedBox(height: 12),
+        for (var i = 0; i < children.length; i++) ...[
+          children[i],
+          if (i != children.length - 1) const SizedBox(height: 12),
+        ],
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+}
+
+class _SettingsTileCard extends StatelessWidget {
+  const _SettingsTileCard({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.subtitleWidget,
+    this.onTap,
+    this.iconColor,
+    this.titleColor,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? subtitleWidget;
+  final VoidCallback? onTap;
+  final Color? iconColor;
+  final Color? titleColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = iconColor ?? theme.colorScheme.primary;
+    final textColor = titleColor ?? theme.colorScheme.onSurface;
+    final hasTap = onTap != null;
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _IconBadge(icon: icon, color: color),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                      ),
+                    ),
+                    if (subtitleWidget != null) ...[
+                      const SizedBox(height: 4),
+                      subtitleWidget!,
+                    ] else if (subtitle != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle!,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (hasTap)
+                Icon(
+                  Icons.chevron_right,
+                  color: theme.colorScheme.outline,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsToggleCard extends StatelessWidget {
+  const _SettingsToggleCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+    this.iconColor,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final Color? iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = iconColor ?? theme.colorScheme.primary;
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SwitchListTile.adaptive(
+        value: value,
+        onChanged: onChanged,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        secondary: _IconBadge(icon: icon, color: color),
+        title: Text(
+          title,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IconBadge extends StatelessWidget {
+  const _IconBadge({required this.icon, required this.color});
+
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        // ignore: deprecated_member_use
+        color: color.withOpacity(0.12),
+        shape: BoxShape.circle,
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Icon(icon, color: color),
     );
   }
 }

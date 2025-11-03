@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/worker_profile.dart';
 import 'package:talent/core/state/app_state.dart';
-import 'package:talent/features/worker/models/availability.dart';
 import 'package:talent/features/worker/widgets/profile_form.dart';
 import 'package:talent/features/worker/widgets/profile_widgets.dart';
 import 'package:talent/features/worker/widgets/work_preferences_widget.dart';
@@ -48,7 +47,6 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
   bool _isEditing = false;
 
   // Form state
-  List<DayAvailability> _availability = [];
   bool _notificationsEnabled = true;
 
   @override
@@ -90,18 +88,14 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
       _experienceController.text = profile.experience;
       _skillsController.text = profile.skills.join(', ');
       _languagesController.text = profile.languages.join(', ');
-      _profilePictureUrlController.text = profile.profilePictureUrl ?? '';
+      _profilePictureUrlController.text = profile.profilePictureSmall ?? 'null';
       _notificationsEnabled = profile.notificationsEnabled;
 
-      final availabilityMaps = profile.availability;
-      _availability = availabilityMaps.map(DayAvailability.fromMap).toList();
 
-      if (_availability.isEmpty) {
-        _availability = _defaultAvailability();
-      }
+      
     } catch (error) {
       debugPrint('Error initializing profile form: $error');
-      _availability = _defaultAvailability();
+      
     }
   }
 
@@ -126,9 +120,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
     final newLanguages = _commaSeparated(_languagesController.text);
     final newProfilePictureUrl = _profilePictureUrlController.text.trim();
 
-    final availabilityPayload =
-        _availability.map((day) => day.toMap()).toList();
-
+   
     await appState.updateWorkerProfile(
       firstName: newFirstName,
       lastName: newLastName,
@@ -137,7 +129,6 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
       experience: newExperience,
       skills: newSkills,
       languages: newLanguages,
-      availability: availabilityPayload,
       notificationsEnabled: _notificationsEnabled,
       profilePictureUrl: newProfilePictureUrl.isEmpty ? null : newProfilePictureUrl,
     );
@@ -157,17 +148,6 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
         .toList();
   }
 
-  List<DayAvailability> _defaultAvailability() {
-    return [
-      DayAvailability(day: 'Monday'),
-      DayAvailability(day: 'Tuesday'),
-      DayAvailability(day: 'Wednesday'),
-      DayAvailability(day: 'Thursday'),
-      DayAvailability(day: 'Friday'),
-      DayAvailability(day: 'Saturday'),
-      DayAvailability(day: 'Sunday'),
-    ];
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -230,10 +210,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen>
                           skillsController: _skillsController,
                           languagesController: _languagesController,
                           profilePictureUrlController: _profilePictureUrlController,
-                          availability: _availability,
-                          onAvailabilityChanged: (value) {
-                            setState(() => _availability = value);
-                          },
+                         
                           notificationsEnabled: _notificationsEnabled,
                           onNotificationsChanged: (value) {
                             setState(() => _notificationsEnabled = value);

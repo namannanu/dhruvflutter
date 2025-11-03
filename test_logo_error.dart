@@ -1,6 +1,7 @@
 // ignore_for_file: avoid_print
 
-import 'lib/features/job/job.dart';
+import 'package:talent/core/models/job.dart';
+
 
 void main() {
   print('Testing logo type error...');

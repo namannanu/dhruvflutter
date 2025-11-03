@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:talent/core/utils/image_url_optimizer.dart';
 import 'cached_network_image_widget.dart';
 
 class BusinessLogoAvatar extends StatelessWidget {
@@ -10,11 +11,13 @@ class BusinessLogoAvatar extends StatelessWidget {
     required this.name,
     this.logoUrl,
     this.size = 44,
+    this.imageContext = ImageContext.jobList,
   });
 
   final String name;
   final String? logoUrl;
   final double size;
+  final ImageContext imageContext;
 
   @override
   Widget build(BuildContext context) {
@@ -38,10 +41,14 @@ class BusinessLogoAvatar extends StatelessWidget {
         );
       }
 
+      // Optimize the URL based on the context
+      final optimizedUrl =
+          ImageUrlOptimizer.optimizeUrl(trimmed, imageContext) ?? trimmed;
+
       return ClipRRect(
         borderRadius: BorderRadius.circular(radius),
         child: CachedNetworkImageWidget(
-          imageUrl: trimmed,
+          imageUrl: optimizedUrl,
           width: size,
           height: size,
           fit: BoxFit.cover,

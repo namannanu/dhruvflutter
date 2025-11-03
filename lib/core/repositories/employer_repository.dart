@@ -1,3 +1,5 @@
+// ignore_for_file: curly_braces_in_flow_control_structures
+
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -22,16 +24,32 @@ class EmployerRepository {
   static const Duration ttlMedium = Duration(minutes: 30);
   static const Duration ttlSlow = Duration(hours: 4);
 
+  /// Publish a job
+  Future<JobPosting> publishJob(String jobId) async {
+    final dio = await DioClient.instance();
+    final url = '$baseUrl/jobs/$jobId/publish';
+    final response = await dio.post(url);
+
+    if (response.data != null) {
+      final jobData = response.data['data'] ?? response.data;
+      if (jobData is Map<String, dynamic>) {
+        return JobPosting.fromJson(jobData);
+      }
+    }
+
+    throw Exception('Failed to publish job: Invalid response format');
+  }
+
   /// Businesses - Offline-first with instant response
   Future<List<BusinessLocation>> getBusinessesSWR() async {
     // Always serve cache first for instant UI
     final cached = _cache.getJson<List>(CacheKeys.businesses);
     if (cached != null) {
       final cachedData = compute(_decodeBusinesses, jsonEncode(cached));
-      
+
       // Start background refresh
       _refreshBusinessesInBackground();
-      
+
       return cachedData;
     }
 
@@ -44,7 +62,8 @@ class EmployerRepository {
           ttl: ttlSlow);
       return fresh;
     } catch (e) {
-      if (kDebugMode) print('❌ Failed to fetch businesses, returning empty list: $e');
+      if (kDebugMode)
+        print('❌ Failed to fetch businesses, returning empty list: $e');
       return <BusinessLocation>[];
     }
   }
@@ -52,12 +71,12 @@ class EmployerRepository {
   void _refreshBusinessesInBackground() {
     Future.delayed(Duration.zero, () async {
       const endpoint = 'businesses';
-      
+
       if (!CircuitBreaker.shouldAllowRequest(endpoint)) {
         if (kDebugMode) print('🚫 Circuit breaker blocking businesses request');
         return;
       }
-      
+
       try {
         final fresh = await _fetchBusinessesFromNetwork()
             .timeout(const Duration(seconds: 8));
@@ -68,7 +87,8 @@ class EmployerRepository {
         if (kDebugMode) print('✅ Background refresh successful for businesses');
       } catch (e) {
         CircuitBreaker.recordFailure(endpoint);
-        if (kDebugMode) print('⚠️ Background refresh failed, keeping cached data: $e');
+        if (kDebugMode)
+          print('⚠️ Background refresh failed, keeping cached data: $e');
       }
     });
   }
@@ -96,21 +116,21 @@ class EmployerRepository {
         print('❌ Businesses API Error: $e');
         print('   Endpoint: $baseUrl/businesses');
       }
-      
+
       // Return empty list instead of crashing
       return <BusinessLocation>[];
     }
   }
 
-  /// Employer Jobs - Offline-first with instant response  
+  /// Employer Jobs - Offline-first with instant response
   Future<List<JobPosting>> getJobsSWR(String userId) async {
     final cached = _cache.getJson<List>(CacheKeys.employerJobs(userId));
     if (cached != null) {
       final cachedData = compute(_decodeJobs, jsonEncode(cached));
-      
+
       // Start background refresh
       _refreshJobsInBackground(userId);
-      
+
       return cachedData;
     }
 
@@ -132,12 +152,13 @@ class EmployerRepository {
       try {
         final fresh = await _fetchJobsFromNetwork(userId)
             .timeout(const Duration(seconds: 10));
-        await _cache.putJson(
-            CacheKeys.employerJobs(userId), fresh.map((j) => j.toJson()).toList(),
+        await _cache.putJson(CacheKeys.employerJobs(userId),
+            fresh.map((j) => j.toJson()).toList(),
             ttl: ttlFast);
         if (kDebugMode) print('✅ Background refresh successful for jobs');
       } catch (e) {
-        if (kDebugMode) print('⚠️ Background refresh failed, keeping cached data: $e');
+        if (kDebugMode)
+          print('⚠️ Background refresh failed, keeping cached data: $e');
       }
     });
   }
@@ -158,14 +179,14 @@ class EmployerRepository {
       final dio = await DioClient.instance();
       final res = await dio.get('$baseUrl/jobs/user/$userId');
       final data = res.data;
-      
+
       // The API returns categorized jobs, we want posted jobs for employers
       if (data is Map && data['data'] != null) {
         final jobData = data['data'];
         final postedJobs = jobData['jobs']?['postedJobs'] as List? ?? [];
         return compute(_decodeJobs, jsonEncode(postedJobs));
       }
-      
+
       // Fallback for direct list response
       final list = (data is List) ? data : (data['data'] as List? ?? []);
       return compute(_decodeJobs, jsonEncode(list));
@@ -175,7 +196,7 @@ class EmployerRepository {
         print('   User ID: $userId');
         print('   Endpoint: $baseUrl/jobs/user/$userId');
       }
-      
+
       // Return empty list instead of crashing
       return <JobPosting>[];
     }
@@ -188,10 +209,10 @@ class EmployerRepository {
     if (cached != null) {
       // Serve cache immediately for instant UI response
       final cachedData = compute(_decodeApplications, jsonEncode(cached));
-      
+
       // Start background refresh without blocking UI
       _refreshApplicationsInBackground(userId);
-      
+
       return cachedData;
     }
 
@@ -204,7 +225,8 @@ class EmployerRepository {
           ttl: ttlFast);
       return fresh;
     } catch (e) {
-      if (kDebugMode) print('❌ Failed to fetch applications, returning empty list: $e');
+      if (kDebugMode)
+        print('❌ Failed to fetch applications, returning empty list: $e');
       // Return empty list instead of crashing
       return <Application>[];
     }
@@ -214,13 +236,14 @@ class EmployerRepository {
   void _refreshApplicationsInBackground(String userId) {
     Future.delayed(Duration.zero, () async {
       final endpoint = 'applications/user/$userId';
-      
+
       // Check circuit breaker before making request
       if (!CircuitBreaker.shouldAllowRequest(endpoint)) {
-        if (kDebugMode) print('🚫 Circuit breaker blocking applications request');
+        if (kDebugMode)
+          print('🚫 Circuit breaker blocking applications request');
         return;
       }
-      
+
       try {
         final fresh = await _fetchApplicationsFromNetwork(userId)
             .timeout(const Duration(seconds: 8));
@@ -228,10 +251,12 @@ class EmployerRepository {
             fresh.map((a) => a.toJson()).toList(),
             ttl: ttlFast);
         CircuitBreaker.recordSuccess(endpoint);
-        if (kDebugMode) print('✅ Background refresh successful for applications');
+        if (kDebugMode)
+          print('✅ Background refresh successful for applications');
       } catch (e) {
         CircuitBreaker.recordFailure(endpoint);
-        if (kDebugMode) print('⚠️ Background refresh failed, keeping cached data: $e');
+        if (kDebugMode)
+          print('⚠️ Background refresh failed, keeping cached data: $e');
       }
     });
   }
@@ -252,14 +277,15 @@ class EmployerRepository {
       final dio = await DioClient.instance();
       final res = await dio.get('$baseUrl/applications/user/$userId');
       final data = res.data;
-      
+
       // The API returns categorized applications, we want employer applications
       if (data is Map && data['data'] != null) {
         final appData = data['data'];
-        final employerApps = appData['applications']?['employerApplications'] as List? ?? [];
+        final employerApps =
+            appData['applications']?['employerApplications'] as List? ?? [];
         return compute(_decodeApplications, jsonEncode(employerApps));
       }
-      
+
       // Fallback for direct list response
       final list = (data is List) ? data : (data['data'] as List? ?? []);
       return compute(_decodeApplications, jsonEncode(list));
@@ -269,7 +295,7 @@ class EmployerRepository {
         print('   User ID: $userId');
         print('   Endpoint: $baseUrl/applications/user/$userId');
       }
-      
+
       // Return empty list instead of crashing
       return <Application>[];
     }
@@ -307,15 +333,12 @@ class EmployerRepository {
     final dio = await DioClient.instance();
     final res = await dio.get('$baseUrl/users/id/$userId/all-data');
     final data = res.data;
-    
+
     if (data is Map && data['data'] != null) {
       final userData = data['data'] as Map<String, dynamic>;
-      return {
-        'user': userData['user'],
-        'profile': userData['profile']
-      };
+      return {'user': userData['user'], 'profile': userData['profile']};
     }
-    
+
     return null;
   }
 
@@ -351,25 +374,26 @@ class EmployerRepository {
     final dio = await DioClient.instance();
     final res = await dio.get('$baseUrl/users/id/$userId/all-data');
     final data = res.data;
-    
+
     if (data is Map && data['data'] != null) {
       final userData = data['data'] as Map<String, dynamic>;
-      
+
       // Create metrics from the available data
       final profile = userData['profile'] as Map<String, dynamic>?;
       final applications = userData['applications'] as Map<String, dynamic>?;
       final jobs = userData['jobs'] as Map<String, dynamic>?;
-      
+
       return {
         'totalJobsPosted': profile?['totalJobsPosted'] ?? 0,
         'totalHires': profile?['totalHires'] ?? 0,
         'totalApplications': applications?['total'] ?? 0,
-        'employerApplications': applications?['employerApplications']?.length ?? 0,
+        'employerApplications':
+            applications?['employerApplications']?.length ?? 0,
         'postedJobs': jobs?['postedJobs']?.length ?? 0,
         'rating': profile?['rating'] ?? 0.0,
       };
     }
-    
+
     return null;
   }
 

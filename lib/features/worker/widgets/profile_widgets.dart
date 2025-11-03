@@ -17,7 +17,7 @@ class ProfileHeader extends StatelessWidget {
         ProfilePictureAvatar(
           firstName: profile.firstName,
           lastName: profile.lastName,
-          profilePictureUrl: profile.profilePictureUrl,
+          profilePictureUrl: profile.profilePictureSmall,
           size: 80,
         ),
         const SizedBox(width: 16),
@@ -72,7 +72,6 @@ class ReadOnlyProfileDetails extends StatelessWidget {
         _infoCard('Experience', profile.experience),
         _chipCard('Skills', profile.skills),
         _chipCard('Languages', profile.languages),
-        _AvailabilitySection(availability: profile.availability),
       ],
     );
   }
@@ -97,71 +96,6 @@ class ReadOnlyProfileDetails extends StatelessWidget {
               : items.map((e) => Chip(label: Text(e))).toList(),
         ),
       ),
-    );
-  }
-}
-
-class _AvailabilitySection extends StatelessWidget {
-  const _AvailabilitySection({required this.availability});
-
-  final List<Map<String, dynamic>> availability;
-
-  bool _coerceBool(dynamic value) {
-    if (value is bool) return value;
-    if (value is num) return value != 0;
-    if (value is String) {
-      final normalized = value.toLowerCase();
-      return normalized == 'true' ||
-          normalized == '1' ||
-          normalized == 'yes' ||
-          normalized == 'available';
-    }
-    return false;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hasAvailability = availability.isNotEmpty;
-
-    return Card(
-      child: hasAvailability
-          ? Column(
-              children: availability.map((day) {
-                final rawSlots = (day['timeSlots'] as List?) ?? const [];
-                final slots = rawSlots
-                    .whereType<Map>()
-                    .map((slot) {
-                      final start = slot['startTime']?.toString() ?? '--';
-                      final end = slot['endTime']?.toString() ?? '--';
-                      return '$start - $end';
-                    })
-                    .where((label) => label.contains('-'))
-                    .toList();
-
-                final isAvailable = _coerceBool(day['isAvailable']) ||
-                    (_coerceBool(day['available']) ||
-                        _coerceBool(day['active']));
-
-                final subtitle = isAvailable
-                    ? (slots.isNotEmpty
-                        ? slots.join(', ')
-                        : 'Available (no time slots set)')
-                    : 'Not available';
-
-                return ListTile(
-                  title: Text(
-                    (day['day'] as String?)?.toUpperCase() ?? 'UNKNOWN',
-                  ),
-                  subtitle: Text(subtitle),
-                );
-              }).toList(),
-            )
-          : const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'No availability schedule added yet. Update your profile to let employers know when you can work.',
-              ),
-            ),
     );
   }
 }

@@ -32,9 +32,12 @@ class WorkerProfile {
     this.shareWorkHistory,
     this.isPremium = false,
     this.premiumExpiresAt,
-    this.profilePictureUrl,
-    this.profilePictureOriginalUrl,
-    this.profilePictureSquareUrl,
+    this.profilePicture,
+    this.profilePictureSmall,
+    this.profilePictureMedium,
+    this.portfolioImages = const [],
+    this.portfolioThumbnails = const [],
+    this.portfolioPreviews = const [],
   });
 
   final String id;
@@ -66,11 +69,14 @@ class WorkerProfile {
   final bool? shareWorkHistory;
   final bool isPremium;
   final DateTime? premiumExpiresAt;
-  
+
   // Profile picture fields
-  final String? profilePictureUrl;
-  final String? profilePictureOriginalUrl;
-  final String? profilePictureSquareUrl;
+  final String? profilePicture;
+  final String? profilePictureSmall;
+  final String? profilePictureMedium;
+  final List<String> portfolioImages;
+  final List<String> portfolioThumbnails;
+  final List<String> portfolioPreviews;
 
   WorkerProfile copyWith({
     String? id,
@@ -102,9 +108,12 @@ class WorkerProfile {
     bool? shareWorkHistory,
     bool? isPremium,
     DateTime? premiumExpiresAt,
-    String? profilePictureUrl,
-    String? profilePictureOriginalUrl,
-    String? profilePictureSquareUrl,
+    String? profilePicture,
+    String? profilePictureSmall,
+    String? profilePictureMedium,
+    List<String>? portfolioImages,
+    List<String>? portfolioThumbnails,
+    List<String>? portfolioPreviews,
   }) {
     return WorkerProfile(
       id: id ?? this.id,
@@ -138,9 +147,12 @@ class WorkerProfile {
       shareWorkHistory: shareWorkHistory ?? this.shareWorkHistory,
       isPremium: isPremium ?? this.isPremium,
       premiumExpiresAt: premiumExpiresAt ?? this.premiumExpiresAt,
-      profilePictureUrl: profilePictureUrl ?? this.profilePictureUrl,
-      profilePictureOriginalUrl: profilePictureOriginalUrl ?? this.profilePictureOriginalUrl,
-      profilePictureSquareUrl: profilePictureSquareUrl ?? this.profilePictureSquareUrl,
+      profilePicture: profilePicture ?? this.profilePicture,
+      profilePictureSmall: profilePictureSmall ?? this.profilePictureSmall,
+      profilePictureMedium: profilePictureMedium ?? this.profilePictureMedium,
+      portfolioImages: portfolioImages ?? this.portfolioImages,
+      portfolioThumbnails: portfolioThumbnails ?? this.portfolioThumbnails,
+      portfolioPreviews: portfolioPreviews ?? this.portfolioPreviews,
     );
   }
 
@@ -287,33 +299,67 @@ class WorkerProfile {
       premiumExpiresAt: payload['premiumExpiresAt'] != null
           ? DateTime.tryParse(payload['premiumExpiresAt'].toString())
           : null,
-      profilePictureUrl: _extractProfilePictureUrl(payload),
-      profilePictureOriginalUrl: _extractProfilePictureOriginalUrl(payload),
-      profilePictureSquareUrl: _extractProfilePictureSquareUrl(payload),
+      profilePicture: _extractProfilePicture(payload),
+      profilePictureSmall: _extractProfilePictureSmall(payload),
+      profilePictureMedium: _extractProfilePictureMedium(payload),
+      portfolioImages: _extractPortfolioImages(payload),
+      portfolioThumbnails: _extractPortfolioThumbnails(payload),
+      portfolioPreviews: _extractPortfolioPreviews(payload),
     );
   }
 
-  // Helper method to extract profile picture URL
-  static String? _extractProfilePictureUrl(Map<String, dynamic> payload) {
-    // Try profilePictureUrl first
-    if (payload['profilePictureUrl'] != null && payload['profilePictureUrl'].toString().trim().isNotEmpty) {
-      return payload['profilePictureUrl'].toString().trim();
+  // Helper methods to extract optimized profile picture URLs
+  static String? _extractProfilePicture(Map<String, dynamic> payload) {
+    // Try profilePicture first
+    if (payload['profilePicture'] != null &&
+        payload['profilePicture'].toString().trim().isNotEmpty) {
+      return payload['profilePicture'].toString().trim();
     }
-    
-    // Try nested profilePicture.original.url
-    final profilePicture = payload['profilePicture'];
-    if (profilePicture is Map<String, dynamic>) {
-      final original = profilePicture['original'];
-      if (original is Map<String, dynamic> && original['url'] != null) {
-        return original['url'].toString().trim();
-      }
-    }
-    
     return null;
   }
 
+  static String? _extractProfilePictureSmall(Map<String, dynamic> payload) {
+    if (payload['profilePictureSmall'] != null) {
+      return payload['profilePictureSmall'].toString().trim();
+    }
+    return null;
+  }
+
+  static String? _extractProfilePictureMedium(Map<String, dynamic> payload) {
+    if (payload['profilePictureMedium'] != null) {
+      return payload['profilePictureMedium'].toString().trim();
+    }
+    return null;
+  }
+
+  static List<String> _extractPortfolioImages(Map<String, dynamic> payload) {
+    final images = payload['portfolioImages'];
+    if (images is List) {
+      return images.whereType<String>().map((e) => e.trim()).toList();
+    }
+    return [];
+  }
+
+  static List<String> _extractPortfolioThumbnails(
+      Map<String, dynamic> payload) {
+    final thumbnails = payload['portfolioThumbnails'];
+    if (thumbnails is List) {
+      return thumbnails.whereType<String>().map((e) => e.trim()).toList();
+    }
+    return [];
+  }
+
+  static List<String> _extractPortfolioPreviews(Map<String, dynamic> payload) {
+    final previews = payload['portfolioPreviews'];
+    if (previews is List) {
+      return previews.whereType<String>().map((e) => e.trim()).toList();
+    }
+    return [];
+  }
+
   // Helper method to extract original profile picture URL
-  static String? _extractProfilePictureOriginalUrl(Map<String, dynamic> payload) {
+  static String? _extractProfilePictureOriginalUrl(
+      Map<String, dynamic> payload) {
     final profilePicture = payload['profilePicture'];
     if (profilePicture is Map<String, dynamic>) {
       final original = profilePicture['original'];
@@ -367,9 +413,14 @@ class WorkerProfile {
       'shareWorkHistory': shareWorkHistory,
       'isPremium': isPremium,
       'premiumExpiresAt': premiumExpiresAt?.toIso8601String(),
-      if (profilePictureUrl != null) 'profilePictureUrl': profilePictureUrl,
-      if (profilePictureOriginalUrl != null) 'profilePictureOriginalUrl': profilePictureOriginalUrl,
-      if (profilePictureSquareUrl != null) 'profilePictureSquareUrl': profilePictureSquareUrl,
+      if (profilePicture != null) 'profilePicture': profilePicture,
+      if (profilePictureSmall != null)
+        'profilePictureSmall': profilePictureSmall,
+      if (profilePictureMedium != null)
+        'profilePictureMedium': profilePictureMedium,
+      'portfolioImages': portfolioImages,
+      'portfolioThumbnails': portfolioThumbnails,
+      'portfolioPreviews': portfolioPreviews,
     };
   }
 }

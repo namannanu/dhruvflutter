@@ -1,3 +1,5 @@
+import 'package:talent/core/models/user.dart';
+
 class BusinessContext {
   final String? businessId;
   final bool allBusinesses;
@@ -561,7 +563,7 @@ class TeamMember {
     required this.name,
     required this.email,
     this.phone,
-    this.avatar,
+    this.avatar, required String id, required User user, required String businessId, required String role, required bool isActive, required List<String> permissions,
   });
 
   factory TeamMember.fromJson(Map<String, dynamic> json) {
@@ -570,7 +572,7 @@ class TeamMember {
       name: json['name'] as String? ?? '',
       email: json['email'] as String? ?? '',
       phone: json['phone'] as String?,
-      avatar: json['avatar'] as String?,
+      avatar: json['avatar'] as String?, id: '', user: User.fromJson(json['user'] as Map<String, dynamic>), businessId: '', role: '', isActive: false, permissions: [],
     );
   }
 

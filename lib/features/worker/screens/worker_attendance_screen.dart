@@ -361,21 +361,9 @@ class _Header extends StatelessWidget {
         border: Border.all(color: Colors.grey.shade200),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
+      child: const Row(
         children: [
-          InkWell(
-            onTap: onBack,
-            borderRadius: BorderRadius.circular(14),
-            child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Icon(
-                Icons.arrow_back_rounded,
-                color: Colors.grey.shade700,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          const Column(
+           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(

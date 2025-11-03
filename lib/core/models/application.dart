@@ -1,21 +1,47 @@
-import '../../features/job/job.dart';
-import 'user.dart';
+import 'package:flutter/foundation.dart';
+import 'package:talent/core/models/enums.dart';
+import 'package:talent/core/models/job.dart';
+import 'package:talent/core/models/user.dart';
 
+/// Helper to convert dynamic value to trimmed non-empty string or null
+String? _stringValue(dynamic value) {
+  if (value == null) return null;
+  final string = value.toString().trim();
+  return string.isEmpty ? null : string;
+}
+
+/// Represents a job application in the system
+Map<String, dynamic>? _mapOrNull(dynamic value) {
+  if (value is Map<String, dynamic>) {
+    return value;
+  }
+  if (value is Map) {
+    return value.map((key, dynamic v) => MapEntry(key.toString(), v));
+  }
+  return null;
+}
+
+/// Parse a string value into an ApplicationStatus enum
+/// Handles various status strings from backend and normalizes them
 ApplicationStatus _parseApplicationStatus(String? value) {
   switch (value?.toLowerCase()) {
     case 'hired':
-    case 'accepted':
     case 'offer_accepted':
       return ApplicationStatus.hired;
+    case 'accepted':
+      return ApplicationStatus.accepted;
     case 'rejected':
     case 'declined':
       return ApplicationStatus.rejected;
     case 'withdrawn':
-      return ApplicationStatus.rejected;
+      return ApplicationStatus.cancelled;
+    case 'completed':
+      return ApplicationStatus.completed;
     case 'pending':
     case 'in_review':
     case 'in-review':
     case 'review':
+    case 'new':
     default:
       return ApplicationStatus.pending;
   }
@@ -38,23 +64,7 @@ List<String> _parseStringList(dynamic value) {
   return const [];
 }
 
-Map<String, dynamic>? _mapOrNull(dynamic value) {
-  if (value is Map<String, dynamic>) {
-    return value;
-  }
-  if (value is Map) {
-    return value.map((key, dynamic v) => MapEntry(key.toString(), v));
-  }
-  return null;
-}
-
-String? _stringValue(dynamic value) {
-  if (value == null) return null;
-  final string = value.toString().trim();
-  return string.isEmpty ? null : string;
-}
-
-/// Represents a job application in the system
+@immutable
 class Application {
   final String id;
   final String workerId;
@@ -288,8 +298,7 @@ class Application {
             json['workerNote'])
         ?.toString();
 
-    final jobPosting =
-        jobMap != null ? JobPosting.fromJson(jobMap) : null;
+    final jobPosting = jobMap != null ? JobPosting.fromJson(jobMap) : null;
 
     final resolvedEmployerId = employerIdValue ??
         (jobPosting != null && jobPosting.employerId.isNotEmpty
@@ -297,12 +306,10 @@ class Application {
             : null);
     final resolvedEmployerEmail =
         employerEmailValue ?? jobPosting?.employerEmail;
-    final resolvedEmployerName =
-        employerNameValue ?? jobPosting?.employerName;
-    final jobBusinessId =
-        jobPosting != null && jobPosting.businessId.isNotEmpty
-            ? jobPosting.businessId
-            : null;
+    final resolvedEmployerName = employerNameValue ?? jobPosting?.employerName;
+    final jobBusinessId = jobPosting != null && jobPosting.businessId.isNotEmpty
+        ? jobPosting.businessId
+        : null;
     final resolvedBusinessId = businessIdValue ?? jobBusinessId;
     final jobBusinessName = jobPosting?.businessName;
     final resolvedBusinessName = businessNameValue ??
@@ -422,34 +429,67 @@ class Application {
     );
   }
 
+  // Status check getters
   bool get isPending => status == ApplicationStatus.pending;
   bool get isHired => status == ApplicationStatus.hired;
-  bool get isRejected =>
-      status == ApplicationStatus.rejected && rawStatus != 'withdrawn';
-  bool get isWithdrawn => rawStatus == 'withdrawn';
+  bool get isAccepted => status == ApplicationStatus.accepted;
+  bool get isRejected => status == ApplicationStatus.rejected;
+  bool get isCancelled => status == ApplicationStatus.cancelled;
+  bool get isCompleted => status == ApplicationStatus.completed;
+  bool get isWithdrawn => isCancelled && rawStatus.toLowerCase() == 'withdrawn';
+  bool get isActive => isPending || isAccepted;
 
   String get statusDisplay {
     if (isWithdrawn) return 'Withdrawn';
+    var label = 'Pending Review';
     switch (status) {
       case ApplicationStatus.pending:
-        return 'Pending';
+        label = 'Pending Review';
+        break;
       case ApplicationStatus.hired:
-        return 'Hired';
+        label = 'Hired';
+        break;
       case ApplicationStatus.rejected:
-        return 'Rejected';
+        label = 'Not Selected';
+        break;
+      case ApplicationStatus.accepted:
+        label = 'Under Consideration';
+        break;
+      case ApplicationStatus.cancelled:
+        label =
+            rawStatus.toLowerCase() == 'withdrawn' ? 'Withdrawn' : 'Cancelled';
+        break;
+      case ApplicationStatus.completed:
+        label = 'Completed';
+        break;
     }
+    return label;
   }
 
   String get statusColor {
-    if (isWithdrawn) return '#9E9E9E';
+    if (isWithdrawn) return '#9E9E9E'; // Grey
+    var color = '#FFA500'; // Default orange for pending
     switch (status) {
       case ApplicationStatus.pending:
-        return '#FFA500';
+        color = '#FFA500'; // Orange
+        break;
       case ApplicationStatus.hired:
-        return '#4CAF50';
+        color = '#4CAF50'; // Green
+        break;
       case ApplicationStatus.rejected:
-        return '#F44336';
+        color = '#F44336'; // Red
+        break;
+      case ApplicationStatus.accepted:
+        color = '#2196F3'; // Blue
+        break;
+      case ApplicationStatus.cancelled:
+        color = '#9E9E9E'; // Grey
+        break;
+      case ApplicationStatus.completed:
+        color = '#4CAF50'; // Green
+        break;
     }
+    return color;
   }
 
   @override

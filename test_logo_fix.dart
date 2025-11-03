@@ -1,6 +1,7 @@
 // ignore_for_file: avoid_print
 
-import 'lib/features/job/job.dart';
+import 'package:talent/core/models/job.dart';
+
 
 void main() {
   print('Testing logo URL size issue fix...');
@@ -75,7 +76,7 @@ void main() {
   try {
     final job1 = JobPosting.fromJson(testJson1);
     print('✅ Successfully created job1: ${job1.title}');
-    print('   Logo URL length: ${job1.businessLogoUrl?.length ?? 0} chars');
+    print('   Logo URL length: ${job1.businessLogoSmall?.length ?? 0} chars');
   } catch (e) {
     print('❌ Error creating job1: $e');
   }
@@ -85,9 +86,9 @@ void main() {
   try {
     final job2 = JobPosting.fromJson(testJson2);
     print('✅ Successfully created job2: ${job2.title}');
-    print('   Logo URL length: ${job2.businessLogoUrl?.length ?? 0} chars');
-    print('   Original URL length: ${job2.businessLogoOriginalUrl?.length ?? 0} chars');
-    print('   Square URL length: ${job2.businessLogoSquareUrl?.length ?? 0} chars');
+    print('   Logo URL length: ${job2.businessLogoSmall?.length ?? 0} chars');
+    print('   Original URL length: ${job2.businessLogoSmall?.length ?? 0} chars');
+    print('   Square URL length: ${job2.businessLogoSmall?.length ?? 0} chars');
   } catch (e) {
     print('❌ Error creating job2: $e');
   }

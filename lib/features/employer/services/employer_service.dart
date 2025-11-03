@@ -1,3 +1,4 @@
+import 'package:talent/core/models/analytics.dart';
 import 'package:talent/core/models/models.dart';
 
 abstract class EmployerService {
@@ -5,6 +6,22 @@ abstract class EmployerService {
   Future<EmployerProfile> fetchEmployerProfile(
     String employerId, {
     String? businessId,
+  });
+
+  /// Update an employer's profile information
+  Future<void> updateEmployerProfile(
+    String employerId, {
+    String? companyName,
+    String? description,
+    String? phone,
+    String? profilePicture,
+    String? profilePictureSmall,
+    String? profilePictureMedium,
+    String? profilePictureLarge,
+    String? companyLogo,
+    String? companyLogoSmall,
+    String? companyLogoMedium,
+    String? companyLogoLarge,
   });
 
   /// Fetch dashboard metrics for an employer

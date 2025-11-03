@@ -112,7 +112,8 @@ class _EmployeeHireApplicationScreenState
         children: [
           const SectionHeader(
             title: 'Candidate applications',
-            subtitle: 'Review applicants and move quickly on hiring decisions', style: TextStyle(fontSize: 10),
+            subtitle: 'Review applicants and move quickly on hiring decisions',
+            style: TextStyle(fontSize: 10),
           ),
           const SizedBox(height: 16),
           _StatusFilterChips(
@@ -561,10 +562,10 @@ class _EmployerApplicationCardState extends State<_EmployerApplicationCard> {
       }
     } else if (application.job != null) {
       // Fallback: Use job's business information to determine ownership
-      final job = application.job!;
+      final job = application.job;
       final currentUserId = appState.currentUser?.id;
 
-      if (currentUserId != null) {
+      if (currentUserId != null && job != null) {
         // Check if current user is the job's employer (direct owner)
         if (job.employerId == currentUserId) {
           displayAccessInfo = BusinessAccessInfo(
@@ -607,79 +608,86 @@ class _EmployerApplicationCardState extends State<_EmployerApplicationCard> {
       child: Material(
         child: Card(
           child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 20,
-                      child: Text(initials),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            application.workerName,
-                            style: theme.textTheme.titleMedium,
-                          ),
-                          Text(
-                            'Applied ${DateFormat.yMd().format(application.submittedAt)}',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ],
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        child: Text(initials),
                       ),
-                    ),
-                    _StatusPill(
-                      color: statusColor,
-                      label: _statusLabel(application.status),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: ),
-                if (application.note?.isNotEmpty == true)
-                  Text(
-                    application.note!,
-                    style: theme.textTheme.bodyMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              application.workerName,
+                              style: theme.textTheme.titleMedium,
+                            ),
+                            Text(
+                              'Applied $submittedLabel',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      _StatusPill(
+                        color: statusColor,
+                        label: _statusLabel(application.status),
+                      ),
+                    ],
                   ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    if (canHire)
-                      FilledButton(
-                        onPressed: _pendingAction == null ? _hire : null,
-                        child: _pendingAction == ApplicationStatus.hired
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Text('Hire'),
-                      ),
-                    const SizedBox(width: 8),
-                    if (canReject)
-                      OutlinedButton(
-                        onPressed: _pendingAction == null ? _reject : null,
-                        child: const Text('Reject'),
-                      ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: _openWorkerProfile,
-                      child: const Text('View Profile'),
+                  const SizedBox(height: 8),
+                  if (application.note?.isNotEmpty == true)
+                    Text(
+                      application.note!,
+                      style: theme.textTheme.bodyMedium,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                ),
-              ],
-            )
-            ), // closes Column
-          ), // closes Padding
-        ), // closes Card
-      ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      if (canHire)
+                        FilledButton(
+                          onPressed: _pendingAction == null ? _hire : null,
+                          child: _pendingAction == ApplicationStatus.hired
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Hire'),
+                        ),
+                      const SizedBox(width: 8),
+                      if (canReject)
+                        OutlinedButton(
+                          onPressed: _pendingAction == null ? _reject : null,
+                          child: const Text('Reject'),
+                        ),
+                      if (canRestore) ...[
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed:
+                              _pendingAction == null ? _restoreToPending : null,
+                          child: const Text('Restore'),
+                        ),
+                      ],
+                      const Spacer(),
+                      TextButton(
+                        onPressed: _openWorkerProfile,
+                        child: const Text('View Profile'),
+                      ),
+                    ],
+                  ),
+                ],
+              )), // closes Column
+        ), // closes Padding
+      ), // closes Card
     );
   }
 }
@@ -740,10 +748,16 @@ String _statusLabel(ApplicationStatus status) {
   switch (status) {
     case ApplicationStatus.pending:
       return 'Pending review';
-    case ApplicationStatus.hired:
-      return 'Hired';
+    case ApplicationStatus.accepted:
+      return 'Accepted';
     case ApplicationStatus.rejected:
       return 'Rejected';
+    case ApplicationStatus.hired:
+      return 'Hired';
+    case ApplicationStatus.completed:
+      return 'Completed';
+    case ApplicationStatus.cancelled:
+      return 'Cancelled';
   }
 }
 
@@ -752,10 +766,15 @@ Color _statusColor(BuildContext context, ApplicationStatus status) {
   switch (status) {
     case ApplicationStatus.pending:
       return scheme.primary;
-    case ApplicationStatus.hired:
-      return scheme.secondary;
+    case ApplicationStatus.accepted:
+      return scheme.tertiary;
     case ApplicationStatus.rejected:
       return scheme.error;
+    case ApplicationStatus.hired:
+    case ApplicationStatus.completed:
+      return scheme.secondary;
+    case ApplicationStatus.cancelled:
+      return scheme.surfaceContainerHighest;
   }
 }
 

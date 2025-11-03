@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/core/utils/job_display_utils.dart';
+import 'package:talent/core/utils/image_url_optimizer.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 import 'package:talent/core/widgets/access_tag.dart';
@@ -50,6 +52,9 @@ class _WorkerJobFeedScreenState extends State<WorkerJobFeedScreen> {
       print('🔍 Job $i: ${job.id} - ${job.title}');
       print('   Status: ${job.status} (${job.status.name})');
       print('   HasApplied: ${job.hasApplied}');
+      print('   BusinessName: ${job.businessName}');
+      print('   BusinessAddress: "${job.businessAddress}"');
+      print('   BusinessAddress.isEmpty: ${job.businessAddress.isEmpty}');
       print('   Tags: ${job.tags}');
     }
     print('🔍 ===============================');
@@ -585,9 +590,139 @@ class JobCard extends StatelessWidget {
   final bool canApply;
   final VoidCallback onApply;
 
+  /// Format business address with enhanced logic and city-specific formatting
+  String _formatBusinessAddress() {
+    // Debug: Print what we have
+    print('🏠 Worker Feed DEBUG: Job ${job.id}');
+    print('   job.businessAddress: "${job.businessAddress}"');
+    print('   job.locationSummary: "${job.locationSummary}"');
+    print('   job.businessName: "${job.businessName}"');
+    if (job.location != null) {
+      print(
+          '   job.location: line1="${job.location!.line1}", city="${job.location!.city}", state="${job.location!.state}", lat=${job.location!.latitude}, lng=${job.location!.longitude}');
+    }
+
+    // Primary: Use businessAddress field (populated by backend migration/new jobs)
+    if (job.businessAddress.isNotEmpty) {
+      print('   ✅ Using businessAddress: "${job.businessAddress}"');
+      return _cleanAddressFormat(job.businessAddress);
+    }
+
+    // Secondary: Use resolved location if available
+    final location = job.location;
+    final locationAddress =
+        location?.fullAddress ?? location?.shortAddress ?? location?.line1;
+    if (locationAddress != null && locationAddress.trim().isNotEmpty) {
+      print('   ✅ Using resolved location address: "$locationAddress"');
+      return _cleanAddressFormat(locationAddress.trim());
+    }
+
+    // Fallback: Use locationSummary if available
+    if (job.locationSummary?.trim().isNotEmpty == true) {
+      print('   ✅ Using locationSummary: "${job.locationSummary}"');
+      return _cleanAddressFormat(job.locationSummary!.trim());
+    }
+
+    // No address available - return empty string instead of business name
+    print('   ❌ No address found, returning empty');
+    return ''; // No location info available
+  }
+
+  /// Clean and format address string for better display
+  String _cleanAddressFormat(String address) {
+    final normalized = address.trim();
+    if (normalized.isEmpty) return '';
+
+    final lowered = normalized.toLowerCase();
+    if (lowered == 'null' || lowered == 'undefined' || lowered == 'n/a') {
+      return '';
+    }
+
+    // Remove any excessive whitespace
+    final cleaned = normalized.replaceAll(RegExp(r'\s+'), ' ');
+
+    // Smart address formatting - prioritize street + city for readability
+    if (cleaned.contains(',')) {
+      final parts = cleaned.split(',').map((e) => e.trim()).toList();
+
+      // If we have multiple parts, show street + city/state for better UX
+      if (parts.length >= 3) {
+        // Format: "Street, City, State" instead of full long address
+        final street = parts[0]; // "Mahaveer Nagar III Cir"
+        final city =
+            parts.length >= 4 ? parts[parts.length - 3] : parts[1]; // "Kota"
+        final state =
+            parts.length >= 3 ? parts[parts.length - 2] : ''; // "Rajasthan"
+
+        if (street.isNotEmpty && city.isNotEmpty) {
+          return state.isNotEmpty ? '$street, $city, $state' : '$street, $city';
+        }
+      }
+    }
+
+    // Fallback: Truncate very long addresses for better UI
+    if (cleaned.length > 60) {
+      // Try to find a good break point (comma, after street address)
+      final commaIndex = cleaned.indexOf(',');
+      if (commaIndex > 20 && commaIndex < 50) {
+        final parts = cleaned.split(',');
+        if (parts.length >= 2) {
+          // Show first part + last part (usually city/state)
+          final firstPart = parts[0].trim();
+          final lastPart = parts.last.trim();
+          return '$firstPart, $lastPart';
+        }
+      }
+      // If no good break point, just truncate with ellipsis
+      return '${cleaned.substring(0, 57)}...';
+    }
+
+    return cleaned;
+  }
+
+  /// Get formatted location for detail view (allows longer text)
+  String _getFormattedLocation() {
+    // Primary: Use businessAddress field (populated by backend migration/new jobs)
+    if (job.businessAddress.isNotEmpty) {
+      final cleaned = _cleanAddressFormat(job.businessAddress);
+      if (cleaned.isNotEmpty) {
+        return cleaned;
+      }
+    }
+
+    final location = job.location;
+    final locationAddress =
+        location?.fullAddress ?? location?.shortAddress ?? location?.line1;
+    if (locationAddress != null && locationAddress.trim().isNotEmpty) {
+      final cleaned = _cleanAddressFormat(locationAddress);
+      if (cleaned.isNotEmpty) {
+        return cleaned;
+      }
+    }
+
+    // Fallback: Use locationSummary if available
+    if (job.locationSummary?.trim().isNotEmpty == true) {
+      final cleaned = _cleanAddressFormat(job.locationSummary!);
+      if (cleaned.isNotEmpty) {
+        return cleaned;
+      }
+    }
+
+    // No location address available
+    return ''; // No location info available
+  }
+
+  /// Format recurrence/frequency for display
+  String _formatRecurrence() {
+    return JobDisplayUtils.formatRecurrence(job.recurrence);
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUser = context.select<AppState, User?>((s) => s.currentUser);
+
+    // Enhanced address formatting with better fallback logic
+    final headerLocation = _formatBusinessAddress();
 
     BusinessAccessInfo? accessInfo;
     if (currentUser != null) {
@@ -616,11 +751,14 @@ class JobCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   BusinessLogoAvatar(
-                    logoUrl: job.businessLogoSquareUrl ?? 
-                             job.businessLogoUrl ?? 
-                             job.businessLogoOriginalUrl,
-                    name: job.businessName.isNotEmpty ? job.businessName : job.title,
+                    logoUrl: job.businessLogoSmall ??
+                        job.businessLogoSmall ??
+                        job.businessLogoSmall,
+                    name: job.businessName.isNotEmpty
+                        ? job.businessName
+                        : job.title,
                     size: 40,
+                    imageContext: ImageContext.jobList,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -629,15 +767,28 @@ class JobCard extends StatelessWidget {
                       children: [
                         Text(
                           job.title,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
                         ),
                         if (job.businessName.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(
                             'Company: ${job.businessName}',
                             style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ],
+                        if (headerLocation.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            headerLocation,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: Colors.grey.shade600),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ],
@@ -681,20 +832,43 @@ class JobCard extends StatelessWidget {
       ),
     );
 
-    // Location
-    if (job.businessAddress.isNotEmpty) {
-      details.add(_buildDetailItem(
-        'Location',
-        job.businessAddress,
-        Icons.location_on,
-      ));
-    }
+    // Location - Enhanced formatting with better fallback
+    final locationLine = _getFormattedLocation();
 
-    // Hourly Rate
     details.add(_buildDetailItem(
-      'Rate',
-      '\$${job.hourlyRate.toStringAsFixed(2)}/hour',
+      'Location',
+      locationLine,
+      Icons.location_on,
+    ));
+
+    // Pay Information
+    final hasOvertime = job.overtime.allowed;
+    final baseRate = job.hourlyRate;
+    final overtimeRate =
+        hasOvertime ? baseRate * job.overtime.rateMultiplier : 0;
+
+    final payRateText = hasOvertime
+        ? '\$${baseRate.toStringAsFixed(2)}/hr (\$${overtimeRate.toStringAsFixed(2)}/hr overtime)'
+        : '\$${baseRate.toStringAsFixed(2)}/hour';
+
+    details.add(_buildDetailItem(
+      'Pay Rate',
+      payRateText,
       Icons.attach_money,
+    ));
+
+    // Job Description
+    details.add(_buildDetailItem(
+      'Description',
+      job.description,
+      Icons.description,
+    ));
+
+    // Frequency/Recurrence
+    details.add(_buildDetailItem(
+      'Frequency',
+      _formatRecurrence(),
+      Icons.repeat,
     ));
 
     // Urgency
@@ -763,10 +937,10 @@ class JobCard extends StatelessWidget {
     final minute1 = start.minute;
     final hour2 = end.hour;
     final minute2 = end.minute;
-    
+
     final startTime = '$hour1:${minute1.toString().padLeft(2, '0')}';
     final endTime = '$hour2:${minute2.toString().padLeft(2, '0')}';
-    
+
     return '$startTime to $endTime';
   }
 }

@@ -30,7 +30,7 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
 
   String? _selectedJobType;
   String _urgency = 'normal';
-  final String _frequency = 'once';
+  String _frequency = 'once';
   bool _hasOvertime = false;
   bool _requestVerification = false;
 
@@ -40,6 +40,8 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
 
   final Set<String> _selectedWorkDays = <String>{};
   bool _submitting = false;
+  bool _locationManuallyEdited =
+      false; // Track if user has manually edited location
   static const int _freeJobQuota = 2;
   static const double _jobPostingFee = 50.0;
   static const Map<String, String> _currencySymbols = {
@@ -327,6 +329,9 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
 
     final String recurrence;
     switch (_frequency) {
+      case 'once':
+        recurrence = 'one-time';
+        break;
       case 'weekly':
         recurrence = 'weekly';
         break;
@@ -357,6 +362,13 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
     final appState = context.read<AppState>();
 
     try {
+      // Debug: Log what location data we're sending
+      final locationText = _locationController.text.trim();
+      debugPrint('🏠 DEBUG: Sending location to API: "$locationText"');
+      debugPrint('🏠 DEBUG: Business address: "${businessLocation.address}"');
+      debugPrint(
+          '🏠 DEBUG: Location manually edited: $_locationManuallyEdited');
+
       // Create the job posting first
       final JobPosting job = await appState.createEmployerJob(
         title: finalTitle,
@@ -365,7 +377,6 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
         business: businessLocation,
         start: startDate,
         end: endDate,
-        locationDescription: _locationController.text.trim(),
         tags: tags.isEmpty ? null : tags,
         urgency: urgencyValue,
         verificationRequired: _requestVerification,
@@ -454,10 +465,19 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
     } else if (_selectedBusiness == null ||
         !businesses.contains(_selectedBusiness)) {
       final selected = businesses.first;
+      final previousBusiness = _selectedBusiness;
       _selectedBusiness = selected;
-      if (_locationController.text.trim().isEmpty ||
-          _locationController.text == selected.address) {
-        _locationController.text = selected.address;
+
+      // Only update location if user hasn't manually edited it
+      if (!_locationManuallyEdited) {
+        final currentLocation = _locationController.text.trim();
+        final shouldUpdate = currentLocation.isEmpty ||
+            (previousBusiness != null &&
+                currentLocation == previousBusiness.address);
+
+        if (shouldUpdate) {
+          _locationController.text = selected.address;
+        }
       }
     }
 
@@ -508,6 +528,10 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
                         _buildBusinessSelector(businesses),
                         const SizedBox(height: 16),
                         _buildJobTypeSection(),
+                        const SizedBox(height: 16),
+                        _buildFrequencySection(),
+                        const SizedBox(height: 16),
+                        _buildWorkDaysSection(),
                         const SizedBox(height: 16),
                         _buildLocationSection(),
                         const SizedBox(height: 16),
@@ -593,10 +617,21 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
                     : (value) {
                         if (value != null) {
                           setState(() {
+                            final previousBusiness = _selectedBusiness;
                             _selectedBusiness = value;
-                            if (_locationController.text.trim().isEmpty ||
-                                _locationController.text == value.address) {
-                              _locationController.text = value.address;
+
+                            // Only update location if user hasn't manually edited it
+                            if (!_locationManuallyEdited) {
+                              final currentLocation =
+                                  _locationController.text.trim();
+                              final shouldUpdate = currentLocation.isEmpty ||
+                                  (previousBusiness != null &&
+                                      currentLocation ==
+                                          previousBusiness.address);
+
+                              if (shouldUpdate) {
+                                _locationController.text = value.address;
+                              }
                             }
                           });
                         }
@@ -667,6 +702,224 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
                 labelText: 'Tags (comma separated)',
                 border: OutlineInputBorder(),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFrequencySection() {
+    final List<_FrequencyOption> frequencyOptions = [
+      const _FrequencyOption(
+        'once',
+        'One Time Job',
+        'Single shift or project',
+        Icons.event,
+      ),
+      const _FrequencyOption(
+        'weekly',
+        'Weekly',
+        'Select specific days of the week',
+        Icons.calendar_view_week,
+      ),
+      const _FrequencyOption(
+        'monthly',
+        'Monthly',
+        'Every month, on salary basesis',
+        Icons.calendar_month,
+      ),
+      const _FrequencyOption(
+        'custom',
+        'Custom Schedule',
+        'Choose specific days',
+        Icons.schedule,
+      ),
+    ];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.refresh, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'How often do you need this worker?',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ...frequencyOptions.map((option) {
+              final bool isSelected = _frequency == option.value;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: InkWell(
+                  onTap: () {
+                    setState(() {
+                      _frequency = option.value;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? Colors.blue.shade50
+                          : Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isSelected ? Colors.blue : Colors.grey.shade300,
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          option.icon,
+                          color:
+                              isSelected ? Colors.blue : Colors.grey.shade600,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                option.label,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: isSelected
+                                      ? Colors.blue.shade700
+                                      : Colors.black87,
+                                ),
+                              ),
+                              Text(
+                                option.description,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: isSelected
+                                      ? Colors.blue.shade600
+                                      : Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkDaysSection() {
+    if (_frequency == 'once') return const SizedBox.shrink();
+
+    final List<String> weekDays = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday'
+    ];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.calendar_view_week, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  _frequency == 'weekly'
+                      ? 'Which days of the week?'
+                      : _frequency == 'monthly'
+                          ? 'Which days of the month?'
+                          : 'Select work days',
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: weekDays.map((day) {
+                final bool isSelected = _selectedWorkDays.contains(day);
+                return FilterChip(
+                  label: Text(day),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        _selectedWorkDays.add(day);
+                      } else {
+                        _selectedWorkDays.remove(day);
+                      }
+                    });
+                  },
+                  selectedColor: Colors.blue.shade100,
+                  checkmarkColor: Colors.blue.shade700,
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _WorkdayQuickButton(
+                  label: 'Weekdays',
+                  onTap: () {
+                    setState(() {
+                      _selectedWorkDays.clear();
+                      _selectedWorkDays.addAll([
+                        'Monday',
+                        'Tuesday',
+                        'Wednesday',
+                        'Thursday',
+                        'Friday'
+                      ]);
+                    });
+                  },
+                ),
+                const SizedBox(width: 8),
+                _WorkdayQuickButton(
+                  label: 'Weekends',
+                  onTap: () {
+                    setState(() {
+                      _selectedWorkDays.clear();
+                      _selectedWorkDays.addAll(['Saturday', 'Sunday']);
+                    });
+                  },
+                ),
+                const SizedBox(width: 8),
+                _WorkdayQuickButton(
+                  label: 'All days',
+                  onTap: () {
+                    setState(() {
+                      _selectedWorkDays.clear();
+                      _selectedWorkDays.addAll(weekDays);
+                    });
+                  },
+                ),
+              ],
             ),
           ],
         ),
@@ -776,10 +1029,23 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
               ],
             ),
             const SizedBox(height: 12),
+            // Job-specific location field
+            // - Auto-fills with business address when business is selected
+            // - Employer can edit for this job only (doesn't affect business profile)
+            // - Edited address is temporary and specific to this job
             TextFormField(
               controller: _locationController,
+              onChanged: (value) {
+                // Mark as manually edited when user types
+                if (!_locationManuallyEdited) {
+                  setState(() {
+                    _locationManuallyEdited = true;
+                  });
+                }
+              },
               decoration: const InputDecoration(
                 labelText: 'Where will the worker report?',
+                hintText: 'Edit address for this job only',
                 border: OutlineInputBorder(),
               ),
               validator: (value) {
@@ -789,6 +1055,28 @@ class _EmployerJobCreateScreenState extends State<EmployerJobCreateScreen> {
                 return null;
               },
             ),
+            if (_locationManuallyEdited && _selectedBusiness != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _locationController.text = _selectedBusiness!.address;
+                          _locationManuallyEdited = false;
+                        });
+                      },
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Reset to business address'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.blue,
+                        textStyle: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),

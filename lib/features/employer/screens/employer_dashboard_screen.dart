@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/services/image_optimization_service.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/core/utils/image_url_optimizer.dart';
 import 'package:talent/features/employer/widgets/edit_business.dart';
 import 'package:talent/features/employer/widgets/work_location_picker.dart';
 import 'package:talent/features/shared/mixins/auto_refresh_mixin.dart';
@@ -30,7 +31,7 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
   Future<void> refreshData() async {
     if (mounted) {
       final appState = context.read<AppState>();
-      
+
       // Use fast initialization instead of blocking refreshActiveRole
       await appState.fastInit();
     }
@@ -120,9 +121,8 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
                 ? profile.companyName
                 : 'Your business');
 
-    final primaryLogoUrl = primaryBusiness?.logoSquareUrl ??
-        primaryBusiness?.logoUrl ??
-        primaryBusiness?.logoOriginalUrl;
+    final primaryLogoUrl =
+        primaryBusiness?.logoUrl ?? primaryBusiness?.logoSmall;
 
     return Scaffold(
       appBar: AppBar(
@@ -152,6 +152,7 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
                 BusinessLogoAvatar(
                   logoUrl: primaryLogoUrl,
                   name: primaryBusinessName,
+                  imageContext: ImageContext.companyLogoLarge,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -232,18 +233,24 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
                   children: [
                     Expanded(
                       child: _MetricTile(
-                        label: 'Free postings left',
-                        value: metrics.freePostingsRemaining.toString(),
+                        label: 'Free posts remaining',
+                        value: metrics.premiumActive
+                            ? 'Unlimited'
+                            : metrics.freePostingsRemaining.toString(),
                         icon: Icons.redeem_outlined,
-                        highlight: metrics.freePostingsRemaining == 0,
+                        highlight: !metrics.premiumActive &&
+                            metrics.freePostingsRemaining == 0,
                       ),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: _MetricTile(
-                        label: 'Premium plan',
-                        value: metrics.premiumActive ? 'Active' : 'Trial',
-                        icon: Icons.workspace_premium,
+                        label: 'Account plan',
+                        value: metrics.premiumActive ? 'Premium' : 'Free Trial',
+                        icon: metrics.premiumActive
+                            ? Icons.workspace_premium
+                            : Icons.account_circle_outlined,
+                        highlight: metrics.premiumActive,
                       ),
                     ),
                   ],
@@ -251,11 +258,10 @@ class _EmployerDashboardScreenState extends State<EmployerDashboardScreen>
               ],
             ),
             const SizedBox(height: 32),
-            
-
             const SectionHeader(
               title: 'Business locations',
-              subtitle: 'Manage hiring context and analytics', style: TextStyle(fontSize: 10),
+              subtitle: 'Manage hiring context and analytics',
+              style: TextStyle(fontSize: 10),
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
@@ -869,9 +875,9 @@ class _BusinessTile extends StatelessWidget {
               children: [
                 BusinessLogoAvatar(
                   name: business.name,
-                  logoUrl: business.logoSquareUrl ??
+                  logoUrl: business.logoSmall ??
                       business.logoUrl ??
-                      business.logoOriginalUrl,
+                      business.logoSmall,
                   size: 44,
                 ),
                 const SizedBox(width: 12),

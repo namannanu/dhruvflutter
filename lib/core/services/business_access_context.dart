@@ -78,16 +78,23 @@ class BusinessAccessContext {
   /// Get access context for a shift/attendance record
   BusinessAccessInfo? getShiftAccessContext({
     required Shift shift,
+    required JobPosting? job,
     required String currentUserEmail,
     required List<TeamAccess> teamAccesses,
   }) {
-    return getAccessContext(
-      employerEmail: shift.employerEmail,
-      employerName: shift.employerName,
-      businessName: shift.businessName,
-      currentUserEmail: currentUserEmail,
-      teamAccesses: teamAccesses,
-    );
+    // If we have the associated job, use its information
+    if (job != null) {
+      return getAccessContext(
+        employerEmail: job.employerEmail,
+        employerName: job.employerName,
+        businessName: job.businessName,
+        currentUserEmail: currentUserEmail,
+        teamAccesses: teamAccesses,
+      );
+    }
+
+    // Otherwise, we can't determine access context without employer info
+    return null;
   }
 }
 

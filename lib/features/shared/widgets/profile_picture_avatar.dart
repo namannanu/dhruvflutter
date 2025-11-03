@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:talent/core/utils/image_url_optimizer.dart';
 import 'cached_network_image_widget.dart';
 
 class ProfilePictureAvatar extends StatelessWidget {
@@ -11,12 +12,14 @@ class ProfilePictureAvatar extends StatelessWidget {
     required this.lastName,
     this.profilePictureUrl,
     this.size = 44,
+    this.imageContext = ImageContext.workerAvatar,
   });
 
   final String firstName;
   final String lastName;
   final String? profilePictureUrl;
   final double size;
+  final ImageContext imageContext;
 
   @override
   Widget build(BuildContext context) {
@@ -40,10 +43,14 @@ class ProfilePictureAvatar extends StatelessWidget {
         );
       }
 
+      // Optimize URL based on the context
+      final optimizedUrl =
+          ImageUrlOptimizer.optimizeUrl(trimmed, imageContext) ?? trimmed;
+
       return ClipRRect(
         borderRadius: BorderRadius.circular(radius),
         child: CachedNetworkImageWidget(
-          imageUrl: trimmed,
+          imageUrl: optimizedUrl,
           width: size,
           height: size,
           fit: BoxFit.cover,
@@ -79,13 +86,13 @@ class ProfilePictureAvatar extends StatelessWidget {
   }
 
   static String _resolveInitials(String firstName, String lastName) {
-    final firstInitial = firstName.trim().isNotEmpty 
-        ? firstName.trim().substring(0, 1).toUpperCase() 
+    final firstInitial = firstName.trim().isNotEmpty
+        ? firstName.trim().substring(0, 1).toUpperCase()
         : '';
-    final lastInitial = lastName.trim().isNotEmpty 
-        ? lastName.trim().substring(0, 1).toUpperCase() 
+    final lastInitial = lastName.trim().isNotEmpty
+        ? lastName.trim().substring(0, 1).toUpperCase()
         : '';
-    
+
     if (firstInitial.isNotEmpty && lastInitial.isNotEmpty) {
       return firstInitial + lastInitial;
     } else if (firstInitial.isNotEmpty) {

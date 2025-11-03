@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/services/image_optimization_service.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/core/utils/image_url_optimizer.dart';
 import 'package:talent/features/shared/widgets/business_logo_avatar.dart';
 
 class EditBusiness extends StatefulWidget {
@@ -41,13 +42,12 @@ class _EditBusinessState extends State<EditBusiness> {
     _descriptionController =
         TextEditingController(text: widget.business.description);
     _addressController =
-        TextEditingController(text: widget.business.fullAddress);
+        TextEditingController(text: widget.business.address);
     _phoneController = TextEditingController(text: widget.business.phone);
     _logoUrlController =
         TextEditingController(text: widget.business.logoUrl ?? '');
     _isActive = widget.business.isActive;
-    _allowedRadius = widget.business.allowedRadius ??
-        150.0; // Default 150 meters to match backend
+    _allowedRadius = widget.business.allowedRadius ?? 150.0; // Default 150 meters to match backend
 
     _nameController.addListener(_handleNameChanged);
     _logoUrlController.addListener(_handleLogoChanged);
@@ -388,6 +388,7 @@ class _EditBusinessState extends State<EditBusiness> {
                                 ? null
                                 : _logoUrlController.text.trim(),
                             size: 56,
+                            imageContext: ImageContext.companyLogoLarge,
                           ),
                         ],
                       ),

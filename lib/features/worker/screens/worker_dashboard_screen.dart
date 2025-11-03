@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/state/app_state.dart';
+import 'package:talent/features/shared/widgets/profile_picture_avatar.dart';
 import 'package:talent/features/shared/widgets/section_header.dart';
 import 'package:talent/features/worker/screens/premium_plan_screen.dart';
 import 'package:talent/features/worker/screens/worker_profile_screen_new.dart';
@@ -208,13 +209,13 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              CircleAvatar(
-                radius: 30,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: Text(
-                  profile.firstName.isNotEmpty ? profile.firstName[0] : '?',
-                  style: const TextStyle(color: Colors.white, fontSize: 24),
-                ),
+              ProfilePictureAvatar(
+                firstName: profile.firstName,
+                lastName: profile.lastName,
+                profilePictureUrl: profile.profilePictureSmall ??
+                    profile.profilePictureMedium ??
+                    profile.profilePictureSmall,
+                size: 60,
               ),
             ],
           ),

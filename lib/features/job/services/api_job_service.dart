@@ -27,12 +27,32 @@ class ApiJobService extends BaseApiService implements JobService {
     String urgency = 'medium',
     bool verificationRequired = false,
     Map<String, dynamic>? location,
-    bool hasOvertime = false,
-    double? overtimeRate,
+    JobOvertime? overtime,
     String recurrence = 'one-time',
     List<String>? workDays,
+    bool autoPublish = true,
   }) async {
     const endpoint = 'api/jobs';
+
+    // Validate work days for weekly recurrence
+    if (recurrence == 'weekly' && workDays != null) {
+      final validDays = {
+        'monday',
+        'tuesday',
+        'wednesday',
+        'thursday',
+        'friday',
+        'saturday',
+        'sunday'
+      };
+      final normalizedDays =
+          workDays.map((day) => day.toLowerCase().trim()).toSet();
+      if (!normalizedDays.every((day) => validDays.contains(day))) {
+        throw ApiWorkConnectException(
+            400, 'Invalid work days provided. Must be valid day names.');
+      }
+    }
+
     final normalizedWorkDays = (workDays ?? [])
         .map((day) => day.trim().toLowerCase())
         .where((day) => day.isNotEmpty)
@@ -46,28 +66,31 @@ class ApiJobService extends BaseApiService implements JobService {
         return double.tryParse(value.toString());
       }
 
+      // Normalize location components
+      location['address']?.toString().trim();
+      location['city']?.toString().trim();
+      location['state']?.toString().trim();
+      location['postalCode']?.toString().trim();
       final latitude = parseDouble(location['latitude']);
       final longitude = parseDouble(location['longitude']);
       final allowedRadius = parseDouble(location['allowedRadius']);
 
+      // Build normalized location object
       normalizedLocation = {
-        if (location['address'] != null)
-          'address': location['address'].toString(),
-        if (location['line1'] != null) 'line1': location['line1'].toString(),
-        if (location['line2'] != null) 'line2': location['line2'].toString(),
-        if (location['city'] != null) 'city': location['city'].toString(),
-        if (location['state'] != null) 'state': location['state'].toString(),
-        if (location['postalCode'] != null)
-          'postalCode': location['postalCode'].toString(),
-        if (location['country'] != null)
-          'country': location['country'].toString(),
-        if (location['formattedAddress'] != null)
-          'formattedAddress': location['formattedAddress'].toString(),
+        'address': location['address']?.toString(),
+        'line1': location['line1']?.toString(),
+        'city': location['city']?.toString(),
+        'state': location['state']?.toString(),
+        'postalCode': location['postalCode']?.toString(),
+        'country': location['country']?.toString(),
+        'formattedAddress': location['formattedAddress']?.toString(),
         if (latitude != null) 'latitude': latitude,
         if (longitude != null) 'longitude': longitude,
         if (allowedRadius != null) 'allowedRadius': allowedRadius,
-        if (location['notes'] != null) 'notes': location['notes'].toString(),
       };
+
+      // Remove null values
+      normalizedLocation.removeWhere((key, value) => value == null);
     }
 
     final startUtc = DateTime.utc(
@@ -103,9 +126,9 @@ class ApiJobService extends BaseApiService implements JobService {
         'recurrence': recurrence,
         'workDays': normalizedWorkDays,
       },
-      'hasOvertime': hasOvertime,
-      if (overtimeRate != null) 'overtimeRate': overtimeRate,
+      'overtime': (overtime ?? const JobOvertime()).toJson(),
       if (normalizedLocation != null) 'location': normalizedLocation,
+      'status': 'active',
     };
 
     final requestHeaders = headers(
@@ -546,6 +569,15 @@ class ApiJobService extends BaseApiService implements JobService {
         _string(businessDetails?['businessName']) ??
         _string(businessDetails?['name']) ??
         '';
+    final jobLocation = JobLocation.fromDynamic(json['location']);
+    final businessLocation =
+        JobLocation.fromDynamic(businessDetails?['location']);
+    final resolvedLocation = jobLocation ?? businessLocation;
+    final businessAddress = _string(json['businessAddress']) ??
+        resolvedLocation?.fullAddress ??
+        resolvedLocation?.shortAddress ??
+        _string(businessDetails?['address']) ??
+        '';
 
     final createdById = _string(json['createdById']) ??
         _string(createdByDetails?['_id']) ??
@@ -577,20 +609,16 @@ class ApiJobService extends BaseApiService implements JobService {
         _stringList(json['workDays']) ??
         <String>[];
 
-    final overtime = _mapOrNull(json['overtime']);
-    final overtimeRate = double.tryParse(_string(overtime?['rateMultiplier']) ??
-            _string(json['overtimeRate']) ??
-            '') ??
-        (hourlyRate * 1.5);
+    final overtimeMap = _mapOrNull(json['overtime']);
+    final overtime = overtimeMap != null ? JobOvertime.fromJson(overtimeMap) : const JobOvertime();
 
     final urgency = _string(json['urgency']) ?? 'medium';
     final tags = _stringList(json['tags']) ?? <String>[];
     final isVerificationRequired = json['verificationRequired'] == true ||
         json['isVerificationRequired'] == true;
     final status = _parseJobStatus(_string(json['status']));
-    final postedAt = DateTime.tryParse(_string(json['createdAt']) ??
-            _string(json['postedAt']) ??
-            '') ??
+    final postedAt = DateTime.tryParse(
+            _string(json['createdAt']) ?? _string(json['postedAt']) ?? '') ??
         DateTime.now();
     final distanceMiles =
         double.tryParse(_string(json['distanceMiles']) ?? '') ?? 0;
@@ -610,7 +638,7 @@ class ApiJobService extends BaseApiService implements JobService {
       scheduleStart: scheduleStart,
       scheduleEnd: scheduleEnd,
       recurrence: recurrence,
-      overtimeRate: overtimeRate,
+      overtime: overtime,
       urgency: urgency,
       tags: tags,
       workDays: workDays,
@@ -629,7 +657,8 @@ class ApiJobService extends BaseApiService implements JobService {
       createdByTag: createdByTag,
       createdByEmail: createdByEmail,
       createdByName: createdByName,
-      businessAddress: '',
+      businessAddress: businessAddress,
+      location: resolvedLocation,
     );
   }
 

@@ -1,8 +1,11 @@
 // ignore_for_file: unnecessary_type_check
 
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
-import 'package:talent/core/models/models.dart';
+import 'package:talent/core/models/analytics.dart';
+import 'package:talent/core/models/models.dart' hide TeamMember;
+import 'package:talent/core/models/team_access.dart';
 import 'package:talent/core/services/base/base_api_service.dart';
 import 'package:talent/core/services/locator/service_locator.dart';
 import 'package:talent/features/business/services/business_service.dart';
@@ -29,8 +32,11 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
     required String city,
     required String state,
     required String postalCode,
-    required String phone,
+    String? phone,
     String? logoUrl,
+    String? logoSmall,
+    String? logoMedium,
+    String? logoLarge,
     // Google Places API location data
     double? latitude,
     double? longitude,
@@ -50,8 +56,11 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
         'state': state,
         'zip': postalCode,
       },
-      'phone': phone,
+      if (phone != null) 'phone': phone,
       if (logoUrl != null && logoUrl.isNotEmpty) 'logoUrl': logoUrl,
+      if (logoSmall != null && logoSmall.isNotEmpty) 'logoSmall': logoSmall,
+      if (logoMedium != null && logoMedium.isNotEmpty) 'logoMedium': logoMedium,
+      if (logoLarge != null && logoLarge.isNotEmpty) 'logoLarge': logoLarge,
 
       // Include Google Places API location data if provided
       if (latitude != null && longitude != null)
@@ -132,6 +141,9 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
     String? phone,
     bool? isActive,
     String? logoUrl,
+    String? logoSmall,
+    String? logoMedium,
+    String? logoLarge,
     double? allowedRadius,
   }) async {
     // Auto-extract business_id from current user if not provided
@@ -161,6 +173,9 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
       if (phone != null) 'phone': phone,
       if (isActive != null) 'isActive': isActive,
       if (logoUrl != null) 'logoUrl': logoUrl,
+      if (logoSmall != null) 'logoSmall': logoSmall,
+      if (logoMedium != null) 'logoMedium': logoMedium,
+      if (logoLarge != null) 'logoLarge': logoLarge,
     };
 
     final requestHeaders = headers(authToken: _authToken);
@@ -365,7 +380,22 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
   // Entity parsing methods
   BusinessLocation _parseBusinessLocation(dynamic value) {
     final json = _mapOrNull(value) ?? const <String, dynamic>{};
-    return BusinessLocation.fromJson(json);
+
+    // Ensure logo URLs are properly mapped
+    final logoPaths = {
+      'logoUrl': _string(json['logoUrl']),
+      'logoSmall': _string(json['logoSmall']),
+      'logoMedium': _string(json['logoMedium']),
+      'logoLarge': _string(json['logoLarge']),
+    };
+
+    // Merge logo paths into the main JSON object
+    final enrichedJson = {
+      ...json,
+      ...logoPaths,
+    };
+
+    return BusinessLocation.fromJson(enrichedJson);
   }
 
   TeamMember _parseTeamMember(dynamic value) {
@@ -397,6 +427,9 @@ class ApiBusinessService extends BaseApiService implements BusinessService {
       role: roleString,
       permissions: permissionStrings,
       isActive: isActive,
+      userId: '',
+      name: '',
+      email: '',
     );
   }
 

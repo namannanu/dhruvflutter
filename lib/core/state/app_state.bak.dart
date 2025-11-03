@@ -1,7 +1,9 @@
 // ignore_for_file: avoid_print, prefer_single_quotes
 
 import 'package:flutter/foundation.dart';
-import 'package:talent/core/models/models.dart';
+import 'package:talent/core/models/analytics.dart';
+import 'package:talent/core/models/models.dart' hide TeamMember;
+import 'package:talent/core/models/team_access.dart';
 import 'package:talent/core/services/locator/service_locator.dart';
 
 class AppState extends ChangeNotifier {

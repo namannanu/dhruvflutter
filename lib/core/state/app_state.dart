@@ -13,6 +13,7 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:talent/core/cache/cache_service.dart';
 import 'package:talent/core/config/environment_config.dart';
 import 'package:talent/core/config/payment_config.dart';
+import 'package:talent/core/models/analytics.dart';
 import 'package:talent/core/models/models.dart';
 import 'package:talent/core/repositories/employer_repository.dart';
 import 'package:talent/core/repositories/worker_repository.dart';
@@ -42,6 +43,7 @@ class AppState extends ChangeNotifier {
   User? _currentUser;
   UserType? _activeRole;
   Timer? _notificationRefreshTimer;
+  Map<ApplicationStatus, List<Application>>? _statusFilterCache;
 
   // Worker state
   WorkerProfile? _workerProfile;
@@ -92,6 +94,27 @@ class AppState extends ChangeNotifier {
   _PendingJobPayment? _pendingJobPayment;
 
   // ================== Initialization ==================
+
+  Future<void> publishJob(String jobId) async {
+    if (_isBusy) return;
+    _isBusy = true;
+    notifyListeners();
+
+    try {
+      // Call backend to publish job
+      final updatedJob = await _employerRepo.publishJob(jobId);
+
+      // Update the job in the local list
+      final index = _employerJobs.indexWhere((job) => job.id == jobId);
+      if (index >= 0) {
+        _employerJobs[index] = updatedJob;
+        notifyListeners();
+      }
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
 
   Future<void> _init() async {
     _cache = await CacheService.open('thrill_cache');
@@ -188,7 +211,6 @@ class AppState extends ChangeNotifier {
     bool? availableForPartTime,
     bool? availableForTemporary,
     String? weekAvailability,
-    required List<Map<String, dynamic>> availability,
   }) async {
     if (_workerProfile == null) return;
 
@@ -211,7 +233,6 @@ class AppState extends ChangeNotifier {
         availableForPartTime: availableForPartTime,
         availableForTemporary: availableForTemporary,
         weekAvailability: weekAvailability,
-        availability: availability,
       );
       _workerProfile = updatedProfile;
       notifyListeners();
@@ -342,28 +363,76 @@ class AppState extends ChangeNotifier {
   ServiceLocator get service => _service;
   TeamMember? get currentUserTeamMember => _currentUserTeamMember;
 
-  /// Get filtered applications by status without triggering network requests
+  /// Get applications filtered by status without triggering network requests
+  /// Optimized for performance with memoization of common status groups
   List<Application> getApplicationsByStatus(ApplicationStatus? status) {
     if (status == null) return _employerApplications;
-    return _employerApplications.where((app) => app.status == status).toList();
+
+    // Use cached results for common status queries
+    _statusFilterCache ??= <ApplicationStatus, List<Application>>{};
+    return _statusFilterCache!.putIfAbsent(
+      status,
+      () => _employerApplications.where((app) => app.status == status).toList(),
+    );
   }
 
-  /// Quick access to cached applications - no network calls
-  Future<List<Application>> getCachedApplications(
-      {ApplicationStatus? status}) async {
+  /// Get applications filtered by multiple statuses
+  List<Application> getApplicationsByStatuses(
+      List<ApplicationStatus> statuses) {
+    if (statuses.isEmpty) return _employerApplications;
+    return _employerApplications
+        .where((app) => statuses.contains(app.status))
+        .toList();
+  }
+
+  /// Get applications that are in an active state (pending or accepted)
+  List<Application> get activeApplications => getApplicationsByStatuses([
+        ApplicationStatus.pending,
+        ApplicationStatus.accepted,
+      ]);
+
+  /// Get applications that are in a completed state (hired or completed)
+  List<Application> get completedApplications => getApplicationsByStatuses([
+        ApplicationStatus.hired,
+        ApplicationStatus.completed,
+      ]);
+
+  /// Get applications that are in a terminated state (rejected or cancelled)
+  List<Application> get terminatedApplications => getApplicationsByStatuses([
+        ApplicationStatus.rejected,
+        ApplicationStatus.cancelled,
+      ]);
+
+  /// Quick access to cached applications with optimized status filtering
+  Future<List<Application>> getCachedApplications({
+    ApplicationStatus? status,
+    List<ApplicationStatus>? statuses,
+  }) async {
     final user = _currentUser;
     if (user == null) return [];
 
     try {
       final cached = await _employerRepo.getApplicationsSWR(user.id);
+
+      if (statuses != null && statuses.isNotEmpty) {
+        return cached.where((app) => statuses.contains(app.status)).toList();
+      }
+
       if (status != null) {
         return cached.where((app) => app.status == status).toList();
       }
+
       return cached;
     } catch (e) {
       if (kDebugMode) print('Failed to get cached applications: $e');
       return _employerApplications;
     }
+  }
+
+  /// Clear the status filter cache when applications are updated
+  void _clearStatusFilterCache() {
+    _statusFilterCache?.clear();
+    _statusFilterCache = null;
   }
 
   /// Prefetch applications for better performance when navigating to application screens
@@ -393,6 +462,59 @@ class AppState extends ChangeNotifier {
 
   /// Get total application count for quick display
   int get totalApplicationCount => _employerApplications.length;
+
+  /// Get counts of active applications (pending or accepted)
+  int get activeApplicationCount => activeApplications.length;
+
+  /// Get counts of completed applications (hired or completed)
+  int get completedApplicationCount => completedApplications.length;
+
+  /// Get counts of terminated applications (rejected or cancelled)
+  int get terminatedApplicationCount => terminatedApplications.length;
+
+  /// Check if there are any applications in the given status
+  bool hasApplicationsInStatus(ApplicationStatus status) =>
+      getApplicationsByStatus(status).isNotEmpty;
+
+  /// Get the most recent application for a specific job
+  Application? getLatestApplicationForJob(String jobId) {
+    final applications = _employerApplications
+        .where((app) => app.jobId == jobId)
+        .toList()
+      ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+    return applications.isNotEmpty ? applications.first : null;
+  }
+
+  /// Update status for multiple applications at once
+  Future<void> updateApplicationStatuses({
+    required List<String> applicationIds,
+    required ApplicationStatus newStatus,
+  }) async {
+    if (applicationIds.isEmpty) return;
+
+    _setBusy(true);
+    try {
+      for (final id in applicationIds) {
+        await _service.employer.updateEmployerApplicationStatus(
+          applicationId: id,
+          status: newStatus,
+        );
+      }
+
+      // Update local state
+      _employerApplications = _employerApplications.map((app) {
+        if (applicationIds.contains(app.id)) {
+          return app.copyWith(status: newStatus);
+        }
+        return app;
+      }).toList();
+
+      _clearStatusFilterCache();
+      notifyListeners();
+    } finally {
+      _setBusy(false);
+    }
+  }
 
   bool get isLoadingCurrentUserTeamMember => _isLoadingCurrentUserTeamMember;
   List<JobPaymentRecord> get jobPayments => List.unmodifiable(_jobPayments);
@@ -674,7 +796,7 @@ class AppState extends ChangeNotifier {
       businessId = user.selectedBusinessId;
 
       if ((businessId == null || businessId.isEmpty) &&
-          _currentUserTeamMember?.businessId.isNotEmpty == true) {
+          _currentUserTeamMember != null) {
         businessId = _currentUserTeamMember!.businessId;
       }
 
@@ -967,17 +1089,43 @@ class AppState extends ChangeNotifier {
 
     final workerId = user.id;
     final resolvedWorkerId = _extractObjectId(workerId) ?? workerId;
+    // Load critical worker data in order so the UI can update quickly.
+    try {
+      _workerJobs = await _service.worker.fetchWorkerJobs(workerId);
+      debugPrint(
+          '✅ Loaded ${_workerJobs.length} worker jobs during refreshActiveRole');
+    } catch (error, stackTrace) {
+      debugPrint('❌ Error loading worker jobs in refreshActiveRole: $error');
+      debugPrint(stackTrace.toString());
+      _workerJobs = [];
+    }
 
-    final futures = <Future<void>>[
+    notifyListeners();
+
+    try {
+      _workerApplications =
+          await _service.worker.fetchWorkerApplications(workerId);
+    } catch (error, stackTrace) {
+      debugPrint(
+          '❌ Error loading worker applications in refreshActiveRole: $error');
+      debugPrint(stackTrace.toString());
+      _workerApplications = [];
+    }
+
+    notifyListeners();
+
+    // Load the rest of the worker dashboard data in the background so it
+    // doesn't block the UI. Each background task updates state when done.
+    final backgroundTasks = <Future<void>>[
       () async {
         try {
-          _workerApplications =
-              await _service.worker.fetchWorkerApplications(workerId);
+          _workerMetrics =
+              await _service.worker.fetchWorkerDashboardMetrics('me');
         } catch (error, stackTrace) {
-          debugPrint(
-              '❌ Error loading worker applications in refreshActiveRole: $error');
+          debugPrint('Error fetching worker dashboard metrics: $error');
           debugPrint(stackTrace.toString());
-          _workerApplications = [];
+        } finally {
+          notifyListeners();
         }
       }(),
       () async {
@@ -988,26 +1136,8 @@ class AppState extends ChangeNotifier {
           debugPrint(
               '❌ Error loading worker attendance records in refreshActiveRole: $error');
           debugPrint(stackTrace.toString());
-        }
-      }(),
-      () async {
-        try {
-          _workerJobs = await _service.worker.fetchWorkerJobs(workerId);
-          debugPrint(
-              '✅ Loaded ${_workerJobs.length} worker jobs during refreshActiveRole');
-        } catch (error) {
-          debugPrint(
-              '❌ Error loading worker jobs in refreshActiveRole: $error');
-          _workerJobs = [];
-        }
-      }(),
-      () async {
-        try {
-          _workerMetrics =
-              await _service.worker.fetchWorkerDashboardMetrics('me');
-        } catch (error, stackTrace) {
-          debugPrint('Error fetching worker dashboard metrics: $error');
-          debugPrint(stackTrace.toString());
+        } finally {
+          notifyListeners();
         }
       }(),
       () async {
@@ -1025,6 +1155,7 @@ class AppState extends ChangeNotifier {
           if (!wasLoading) {
             _isLoadingEmploymentHistory = false;
           }
+          notifyListeners();
         }
       }(),
       () async {
@@ -1041,11 +1172,12 @@ class AppState extends ChangeNotifier {
           if (!wasLoading) {
             _isLoadingWorkerFeedback = false;
           }
+          notifyListeners();
         }
       }(),
     ];
 
-    await Future.wait(futures);
+    unawaited(Future.wait(backgroundTasks));
 
     _workerProfile ??= WorkerProfile(
       id: user.id,
@@ -1125,8 +1257,9 @@ class AppState extends ChangeNotifier {
       }(),
       () async {
         try {
-          _employerMetrics =
+          final metrics =
               await _service.employer.fetchEmployerDashboardMetrics(userId);
+          _employerMetrics = metrics as EmployerDashboardMetrics?;
         } catch (error) {
           debugPrint('Error fetching employer metrics: $error');
         }
@@ -1366,7 +1499,8 @@ class AppState extends ChangeNotifier {
           _workerProfile ??= await _service.worker.fetchWorkerProfile('me');
         }(),
         () async {
-          _workerMetrics ??= await _service.worker.fetchWorkerDashboardMetrics('me');
+          _workerMetrics ??=
+              await _service.worker.fetchWorkerDashboardMetrics('me');
         }(),
       ];
 
@@ -1381,6 +1515,36 @@ class AppState extends ChangeNotifier {
   }
 
   /// Lightweight refresh that prioritizes cache for instant UI
+  /// Get all applications for a specific job
+  List<Application> getApplicationsForJob(String jobId) {
+    return _employerApplications.where((app) => app.jobId == jobId).toList()
+      ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+  }
+
+  /// Get applications grouped by status
+  Map<ApplicationStatus, List<Application>> getApplicationsGroupedByStatus() {
+    final grouped = <ApplicationStatus, List<Application>>{};
+    for (final status in ApplicationStatus.values) {
+      grouped[status] = getApplicationsByStatus(status);
+    }
+    return grouped;
+  }
+
+  /// Get application statistics for a specific job
+  Map<String, dynamic> getJobApplicationStats(String jobId) {
+    final jobApplications = getApplicationsForJob(jobId);
+    return {
+      'total': jobApplications.length,
+      'pending': jobApplications.where((app) => app.isPending).length,
+      'accepted': jobApplications.where((app) => app.isAccepted).length,
+      'hired': jobApplications.where((app) => app.isHired).length,
+      'rejected': jobApplications.where((app) => app.isRejected).length,
+      'cancelled': jobApplications.where((app) => app.isCancelled).length,
+      'completed': jobApplications.where((app) => app.isCompleted).length,
+      'withdrawn': jobApplications.where((app) => app.isWithdrawn).length,
+    };
+  }
+
   Future<void> lightRefreshActiveRole() async {
     if (_currentUser == null || _activeRole == null) return;
 
@@ -1745,7 +1909,6 @@ class AppState extends ChangeNotifier {
     required BusinessLocation business,
     required DateTime start,
     required DateTime end,
-    required String locationDescription,
     List<String>? tags,
     String? urgency,
     bool? verificationRequired,
@@ -1758,9 +1921,10 @@ class AppState extends ChangeNotifier {
     try {
       debugPrint(
           '📡 AppState: creating job via API for business ${business.id}');
+      debugPrint('🏠 AppState DEBUG: business.address: "${business.address}"');
+
       final location = <String, dynamic>{
-        if (locationDescription.isNotEmpty)
-          'formattedAddress': locationDescription,
+        if (business.address.isNotEmpty) 'line1': business.address,
         if (business.name.isNotEmpty) 'name': business.name,
         if (business.address.isNotEmpty) 'address': business.address,
         if (business.city.isNotEmpty) 'city': business.city,
@@ -1775,6 +1939,8 @@ class AppState extends ChangeNotifier {
           'timezone': business.timezone,
       };
 
+      debugPrint('🏠 AppState DEBUG: Final location object: $location');
+
       final job = await _service.job.createJob(
         title: title,
         description: description,
@@ -1786,8 +1952,10 @@ class AppState extends ChangeNotifier {
         urgency: urgency ?? 'medium',
         verificationRequired: verificationRequired ?? false,
         location: location.isEmpty ? null : location,
-        hasOvertime: hasOvertime ?? false,
-        overtimeRate: overtimeRate,
+        overtime: JobOvertime(
+          allowed: hasOvertime ?? false,
+          rateMultiplier: (overtimeRate ?? 1.5) / 100.0,
+        ),
         recurrence: recurrence ?? 'one-time',
         workDays: workDays,
       );
@@ -1994,24 +2162,35 @@ class AppState extends ChangeNotifier {
           description: job.description,
           employerId: job.employerId,
           businessId: job.businessId,
-          businessAddress: job.businessAddress,
           hourlyRate: job.hourlyRate,
           scheduleStart: job.scheduleStart,
           scheduleEnd: job.scheduleEnd,
           recurrence: job.recurrence,
-          overtimeRate: job.overtimeRate,
+          overtime: job.overtime,
           urgency: job.urgency,
           tags: job.tags,
           workDays: job.workDays,
           isVerificationRequired: job.isVerificationRequired,
-          status: status, // Updated status
+          status: status,
           postedAt: job.postedAt,
-          businessName: job.businessName,
-          locationSummary: job.locationSummary,
-          applicantsCount: job.applicantsCount,
+          isPublished: job.isPublished,
+          publishStatus: job.publishStatus,
+          publishActionRequired: job.publishActionRequired,
           distanceMiles: job.distanceMiles,
           hasApplied: job.hasApplied,
           premiumRequired: job.premiumRequired,
+          locationSummary: job.locationSummary,
+          location: job.location,
+          applicantsCount: job.applicantsCount,
+          businessName: job.businessName,
+          businessAddress: job.businessAddress,
+          employerName: job.employerName,
+          employerEmail: job.employerEmail,
+          businessLogoSmall: job.businessLogoSmall,
+          businessLogoMedium: job.businessLogoMedium,
+          employerAvatarSmall: job.employerAvatarSmall,
+          employerAvatarMedium: job.employerAvatarMedium,
+          metrics: job.metrics,
         );
       }
 
@@ -3229,11 +3408,12 @@ class AppState extends ChangeNotifier {
           employerId: _workerJobs[jobIndex].employerId,
           businessId: _workerJobs[jobIndex].businessId,
           businessAddress: _workerJobs[jobIndex].businessAddress,
+          location: _workerJobs[jobIndex].location,
           hourlyRate: _workerJobs[jobIndex].hourlyRate,
           scheduleStart: _workerJobs[jobIndex].scheduleStart,
           scheduleEnd: _workerJobs[jobIndex].scheduleEnd,
           recurrence: _workerJobs[jobIndex].recurrence,
-          overtimeRate: _workerJobs[jobIndex].overtimeRate,
+          overtime: _workerJobs[jobIndex].overtime,
           urgency: _workerJobs[jobIndex].urgency,
           tags: _workerJobs[jobIndex].tags,
           workDays: _workerJobs[jobIndex].workDays,
@@ -3766,30 +3946,35 @@ class AppState extends ChangeNotifier {
       description: job.description,
       employerId: job.employerId,
       businessId: job.businessId,
-      businessAddress: job.businessAddress,
       hourlyRate: job.hourlyRate,
       scheduleStart: job.scheduleStart,
       scheduleEnd: job.scheduleEnd,
       recurrence: job.recurrence,
-      overtimeRate: job.overtimeRate,
+      overtime: job.overtime,
       urgency: job.urgency,
       tags: List<String>.from(job.tags),
       workDays: List<String>.from(job.workDays),
       isVerificationRequired: job.isVerificationRequired,
       status: JobStatus.active,
       postedAt: job.postedAt,
+      isPublished: job.isPublished,
+      publishStatus: job.publishStatus,
+      publishActionRequired: job.publishActionRequired,
       distanceMiles: job.distanceMiles,
       hasApplied: job.hasApplied,
       premiumRequired: false,
       locationSummary: job.locationSummary,
+      location: job.location,
       applicantsCount: job.applicantsCount,
       businessName: job.businessName,
-      employerEmail: job.employerEmail,
+      businessAddress: job.businessAddress,
       employerName: job.employerName,
-      createdById: job.createdById,
-      createdByTag: job.createdByTag,
-      createdByEmail: job.createdByEmail,
-      createdByName: job.createdByName,
+      employerEmail: job.employerEmail,
+      businessLogoSmall: job.businessLogoSmall,
+      businessLogoMedium: job.businessLogoMedium,
+      employerAvatarSmall: job.employerAvatarSmall,
+      employerAvatarMedium: job.employerAvatarMedium,
+      metrics: job.metrics,
     );
 
     final updatedJobs = List<JobPosting>.from(_employerJobs);

@@ -45,41 +45,41 @@ class _WorkerShellState extends State<WorkerShell> {
       appBar: AppBar(
         title: const Text(
           'Worker Dashboard',
-          style: TextStyle(fontSize: 18),
+          style: TextStyle(fontSize: 16),
         ),
         actions: [
           IconButton(
-            tooltip: 'Messages',
-            icon: const Icon(Icons.message, size: 20),
-            onPressed: _openMessaging,
+        tooltip: 'Messages',
+        icon: const Icon(Icons.message, size: 18),
+        onPressed: _openMessaging,
 
           ),
           Badge(
-            label: appState.unreadNotificationCount > 0
-                ? Text(appState.unreadNotificationCount.toString())
-                : null,
-            child: IconButton(
-              icon: const Icon(Icons.notifications_outlined,size: 20),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const NotificationsScreen(),
-                  ),
-                );
-              },
-            ),
+        label: appState.unreadNotificationCount > 0
+            ? Text(appState.unreadNotificationCount.toString())
+            : null,
+        child: IconButton(
+          icon: const Icon(Icons.notifications_outlined,size: 18),
+          onPressed: () {
+            Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const NotificationsScreen(),
+          ),
+            );
+          },
+        ),
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) async {
-              if (value == 'logout') {
-                await appState.logout();
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'logout', child: Text('Logout')),
-            ],
+        icon: const Icon(Icons.more_vert, size: 18),
+        onSelected: (value) async {
+          if (value == 'logout') {
+            await appState.logout();
+          }
+        },
+        itemBuilder: (context) => const [
+          PopupMenuItem(value: 'logout', child: Text('Logout')),
+        ],
           ),
         ],
       ),

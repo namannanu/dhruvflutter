@@ -3,9 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:talent/core/state/app_state.dart';
-import 'package:talent/features/worker/models/availability.dart';
-import 'package:talent/features/worker/widgets/availability_schedule.dart';
-
 class WorkPreferencesWidget extends StatefulWidget {
   const WorkPreferencesWidget({super.key});
 
@@ -22,7 +19,6 @@ class _WorkPreferencesWidgetState extends State<WorkPreferencesWidget> {
   bool _isAvailableForPartTime = false;
   bool _isAvailableForTemporary = false;
   String _weekAvailability = 'All week';
-  List<DayAvailability> _availability = [];
 
   // Week availability options
   static const List<String> _weekAvailabilityOptions = [
@@ -39,7 +35,6 @@ class _WorkPreferencesWidgetState extends State<WorkPreferencesWidget> {
     super.initState();
     _minPayController = TextEditingController();
     _maxDistanceController = TextEditingController();
-    _initializeAvailability();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadPreferences();
     });
@@ -61,36 +56,13 @@ class _WorkPreferencesWidgetState extends State<WorkPreferencesWidget> {
     });
   }
 
-  void _initializeAvailability() {
-    final appState = context.read<AppState>();
-    final profile = appState.workerProfile;
-    if (profile != null) {
-      final availabilityMaps = (profile.availability as List)
-          .whereType<Map<String, dynamic>>()
-          .toList();
-      _availability = availabilityMaps.map(DayAvailability.fromMap).toList();
-    }
-    if (_availability.isEmpty) {
-      _availability = [
-        DayAvailability(day: 'Monday'),
-        DayAvailability(day: 'Tuesday'),
-        DayAvailability(day: 'Wednesday'),
-        DayAvailability(day: 'Thursday'),
-        DayAvailability(day: 'Friday'),
-        DayAvailability(day: 'Saturday'),
-        DayAvailability(day: 'Sunday'),
-      ];
-    }
-  }
-
+  
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
     try {
-      final availabilityPayload =
-          _availability.map((day) => day.toMap()).toList();
-
+      
       await context.read<AppState>().updateWorkerPreferences(
             minimumPay: double.tryParse(_minPayController.text),
             maxTravelDistance: double.tryParse(_maxDistanceController.text),
@@ -98,7 +70,6 @@ class _WorkPreferencesWidgetState extends State<WorkPreferencesWidget> {
             availableForPartTime: _isAvailableForPartTime,
             availableForTemporary: _isAvailableForTemporary,
             weekAvailability: _weekAvailability,
-            availability: availabilityPayload,
           );
 
       if (!mounted) return;
@@ -128,17 +99,7 @@ class _WorkPreferencesWidgetState extends State<WorkPreferencesWidget> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Availability Schedule
-              AvailabilitySchedule(
-                availability: _availability,
-                onAvailabilityChanged: (newAvailability) {
-                  setState(() {
-                    _availability = newAvailability;
-                  });
-                },
-              ),
-              const SizedBox(height: 24),
-
+            
               // Pay & Distance Section
               Text(
                 'Pay & Distance',
@@ -222,14 +183,14 @@ class _WorkPreferencesWidgetState extends State<WorkPreferencesWidget> {
                       onChanged: (value) =>
                           setState(() => _isAvailableForFullTime = value),
                     ),
-                    const Divider(height: 1),
+                    const SizedBox(height: 10),
                     SwitchListTile(
                       title: const Text('Available for part-time'),
                       value: _isAvailableForPartTime,
                       onChanged: (value) =>
                           setState(() => _isAvailableForPartTime = value),
                     ),
-                    const Divider(height: 1),
+                    const SizedBox(height: 10),
                     SwitchListTile(
                       title: const Text('Available for temporary/contract'),
                       value: _isAvailableForTemporary,
